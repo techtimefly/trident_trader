@@ -22,7 +22,7 @@ from sqlalchemy import select
 from trident.audit.log import configure_logging
 from trident.clock import ET, is_market_open, now_et
 from trident.dashboard.alpaca_view import get_account, list_positions
-from trident.persistence.models import AuditEvent, Signal
+from trident.persistence.models import AuditEvent, Order as OrderModel, Signal
 from trident.persistence.session import session_scope
 from trident.persistence.state import (
     kill_switch_engaged,
@@ -130,6 +130,37 @@ def api_signals(request: Request) -> Any:
             for r in rows
         ]
     return templates.TemplateResponse(request, "_signals.html", {"rows": rendered})
+
+
+@app.get("/api/orders", response_class=HTMLResponse)
+def api_orders(request: Request) -> Any:
+    today = now_et().date()
+    cutoff = datetime.combine(today, datetime.min.time(), tzinfo=ET)
+    with session_scope() as s:
+        stmt = (
+            select(OrderModel)
+            .where(OrderModel.submitted_at >= cutoff)
+            .order_by(OrderModel.submitted_at.desc())
+            .limit(20)
+        )
+        rows = list(s.scalars(stmt))
+        rendered = [
+            {
+                "ts": r.submitted_at.astimezone(ET).strftime("%H:%M:%S") if r.submitted_at else "—",
+                "symbol": r.symbol,
+                "side": r.side,
+                "qty": r.qty,
+                "state": r.state,
+                "filled_at": r.filled_at.astimezone(ET).strftime("%H:%M:%S") if r.filled_at else "—",
+                "avg_fill": _fmt_money(r.avg_fill_price) if r.avg_fill_price else "—",
+                "client_id": r.client_order_id,
+                "is_terminal": r.state in {"filled", "canceled", "cancelled", "rejected", "expired"},
+                "is_filled": r.state == "filled",
+                "is_rejected": r.state in {"rejected", "canceled", "cancelled", "expired"},
+            }
+            for r in rows
+        ]
+    return templates.TemplateResponse(request, "_orders.html", {"rows": rendered})
 
 
 @app.get("/api/audit", response_class=HTMLResponse)

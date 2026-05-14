@@ -8,14 +8,18 @@ is correctness and discipline, not feature breadth.
 > **Not investment advice.** This is software for the author's own learning and
 > experimentation. Trading securities involves risk of loss.
 
-## v0.1 scope
+## Current scope
 
 - **Strategy:** 5-minute Opening Range Breakout on liquid US large-caps
   (SPY, QQQ, AAPL, MSFT, NVDA, AMD).
-- **Broker:** Alpaca paper account.
+- **Broker:** Alpaca paper account (the adapter refuses non-paper URLs).
 - **Data:** Alpaca's bundled IEX feed.
-- **Mode:** Shadow only — signals generated, gate evaluated, no orders submitted.
-  Live paper execution lands in v0.2 after a clean week of shadow runs.
+- **Modes:**
+  - `shadow_run.py` — signals generated, gate evaluated, **no orders submitted**.
+  - `paper_run.py` — submits bracket orders to the Alpaca paper account,
+    polls fills, reconciles positions, flattens at EOD.
+  - `deadman.py` — independent watchdog process that flattens if the runner's
+    heartbeat goes stale.
 
 ## Setup
 
@@ -62,7 +66,7 @@ before going further.
 PYTHONPATH=src python scripts/backfill_daily.py 60
 ```
 
-### 6. Shadow run
+### 6. Shadow run (no orders submitted)
 
 ```bash
 PYTHONPATH=src python scripts/shadow_run.py
@@ -72,6 +76,37 @@ This connects to Alpaca's WebSocket bar feed during US market hours, runs the
 ORB strategy, and logs every signal + risk-gate decision. **No orders are placed.**
 The runner writes a heartbeat every 5 seconds so the dashboard can show whether
 it's alive.
+
+### 6b. Paper run (real bracket orders to the paper account)
+
+> Use this only after a week or more of clean shadow runs. The two scripts
+> share all logic except whether orders are actually submitted.
+
+```bash
+# Terminal A — the runner
+PYTHONPATH=src python scripts/paper_run.py
+
+# Terminal B — the dead-man's switch (independent process)
+PYTHONPATH=src python scripts/deadman.py
+```
+
+What the paper runner does, on top of what shadow does:
+- Submits approved signals as **bracket orders** with deterministic
+  `client_order_id`s (signal-id-derived, so retries can never double-submit).
+- Polls Alpaca every 10s to update local order state.
+- Reconciles local positions against Alpaca every 60s; drift is audited.
+- Schedules an **EOD flatten** 5 minutes before the session close
+  (`close_all_positions(cancel_orders=True)`). Half-day sessions are
+  handled (12:55 ET on the early-close day after Thanksgiving, etc.).
+
+The dead-man's switch is a separate process that watches the heartbeat.
+If the runner stops writing a heartbeat for >45 seconds **and** there are
+open positions or orders, it cancels everything and closes everything.
+Run it in a second terminal, tmux pane, or systemd unit.
+
+The dashboard's **Orders** panel shows today's orders by state. The kill
+switch in the hero strip works in both shadow and paper modes — engaging
+it makes the gate reject every new signal until you release it.
 
 ### 7. Dashboard
 
@@ -122,20 +157,27 @@ src/trident/
   data/                # WebSocket feed + bar store + bar persistence
   strategies/          # Strategy protocol + ORB implementation
   risk/                # the pre-trade gate, sizing, and limits
+  execution/           # Broker protocol + Alpaca adapter + bracket orders
+  portfolio/           # order tracking + position reconciliation
+  safety/              # EOD flatten
   audit/               # append-only event log + structured logging
   persistence/         # SQLAlchemy models + migrations + kill switch state
   dashboard/           # FastAPI + HTMX dashboard (localhost only)
 tests/unit/            # pure-function tests for the safety-critical code
-scripts/               # smoke_test, shadow_run, run_dashboard, backfill_daily
+scripts/               # smoke_test, shadow_run, paper_run, deadman,
+                       # run_dashboard, backfill_daily
 ```
 
 ## Roadmap
 
-- **v0.1 (this commit):** scaffolding, market clock, data feed, strategy, risk
-  gate, dashboard with kill switch.
-- **v0.2:** Alpaca execution adapter, bracket orders with idempotency keys,
-  reconciliation loop, dead-man's switch, EOD flatten.
-- **v0.3:** Backtest harness with honest slippage + walk-forward.
+- **v0.1:** scaffolding, market clock, data feed, strategy, risk gate,
+  dashboard with kill switch.
+- **v0.2 (current):** Alpaca execution adapter, bracket orders with
+  idempotency keys, polling-based order tracking, reconciliation loop,
+  dead-man's switch, EOD flatten, paper_run.py.
+- **v0.3:** Trade-updates WebSocket (replace polling), partial-fill
+  handling, scale-out at 1R + trailing remainder, backtest harness with
+  honest slippage + walk-forward.
 - **v0.4:** LLM-narrated trade journal (Claude or GPT, one model, cached).
 - **Some day:** Real money. After at least 8 consecutive weeks of paper
   profitability across at least one regime change, **and** a clean audit-log

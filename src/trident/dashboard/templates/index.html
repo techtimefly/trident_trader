@@ -108,7 +108,6 @@
                 <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                     <div class="flex items-center gap-2">
                         <h2 class="text-sm font-semibold tracking-tight">Today's signals</h2>
-                        <span class="pill pill-dim">shadow mode</span>
                     </div>
                 </div>
                 <div
@@ -120,6 +119,22 @@
                 </div>
             </section>
         </div>
+
+        <section class="panel">
+            <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <h2 class="text-sm font-semibold tracking-tight">Today's orders</h2>
+                    <span class="pill pill-dim">paper account</span>
+                </div>
+            </div>
+            <div
+                id="orders"
+                hx-get="/api/orders"
+                hx-trigger="load, every 5s"
+                hx-swap="innerHTML">
+                <div class="skeleton h-16 m-4 rounded-md"></div>
+            </div>
+        </section>
 
         <section class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">

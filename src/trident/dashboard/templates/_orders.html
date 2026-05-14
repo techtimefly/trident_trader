@@ -1,0 +1,43 @@
+{% if rows %}
+<table class="tt mono text-sm">
+    <thead>
+        <tr>
+            <th>Submitted</th>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>State</th>
+            <th>Filled</th>
+            <th>Avg fill</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="dim">{{ r.ts }}</td>
+            <td class="font-semibold">{{ r.symbol }}</td>
+            <td>{{ r.side }}</td>
+            <td>{{ r.qty }}</td>
+            <td>
+                {% if r.is_filled %}
+                    <span class="pill pill-green">filled</span>
+                {% elif r.is_rejected %}
+                    <span class="pill pill-red">{{ r.state }}</span>
+                {% elif r.is_terminal %}
+                    <span class="pill pill-dim">{{ r.state }}</span>
+                {% else %}
+                    <span class="pill pill-amber">{{ r.state }}</span>
+                {% endif %}
+            </td>
+            <td class="dim">{{ r.filled_at }}</td>
+            <td>{{ r.avg_fill }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">
+    No orders today. The paper runner submits a bracket order when a signal
+    passes the risk gate; the shadow runner never submits.
+</div>
+{% endif %}

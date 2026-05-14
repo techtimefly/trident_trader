@@ -1,0 +1,81 @@
+{% if run %}
+<div class="px-5 py-4 border-b border-[var(--border)]">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Window</div>
+            <div class="mono text-sm mt-1">{{ run.first_day }} → {{ run.last_day }}</div>
+            <div class="text-xs dim mt-1">{{ run.days }} trading days &middot; {{ run.strategy }}</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Trades</div>
+            <div class="mono text-xl mt-1">{{ run.num_trades }}</div>
+            <div class="text-xs dim mt-1">{{ run.wins }}W / {{ run.losses }}L</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Win rate</div>
+            <div class="mono text-xl mt-1">{{ run.win_rate }}</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Avg R</div>
+            <div class="mono text-xl mt-1">{{ run.avg_r }}</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Total P&amp;L</div>
+            <div class="mono text-xl mt-1 {{ 'pos' if run.total_pnl_positive else 'neg' }}">{{ run.total_pnl }}</div>
+            <div class="text-xs dim mt-1">no fees, no slippage</div>
+        </div>
+    </div>
+    <div class="text-xs dim mt-3">Last replayed {{ run.started_at }}</div>
+</div>
+
+{% if rows %}
+<div class="max-h-96 overflow-y-auto">
+<table class="tt mono text-sm">
+    <thead class="sticky top-0 bg-[var(--panel)]">
+        <tr>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Sym</th>
+            <th>Qty</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>Why</th>
+            <th>P&amp;L</th>
+            <th>R</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="dim">{{ r.date }}</td>
+            <td class="dim">{{ r.time }}</td>
+            <td class="font-semibold">{{ r.symbol }}</td>
+            <td>{{ r.qty }}</td>
+            <td>{{ r.entry }}</td>
+            <td>{{ r.exit }}</td>
+            <td>
+                {% if r.is_target %}
+                    <span class="pill pill-green">target</span>
+                {% elif r.is_stop %}
+                    <span class="pill pill-red">stop</span>
+                {% else %}
+                    <span class="pill pill-amber">eod</span>
+                {% endif %}
+            </td>
+            <td class="{{ 'pos' if r.pl_positive else 'neg' }}">{{ r.pnl }}</td>
+            <td class="{{ 'pos' if r.pl_positive else 'neg' }}">{{ r.r }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="empty">Replay produced no trades.</div>
+{% endif %}
+
+{% else %}
+<div class="empty">
+    No replay run yet. Run <span class="mono">PYTHONPATH=src python scripts/replay.py --days 90</span>
+    and refresh.
+</div>
+{% endif %}

@@ -82,13 +82,15 @@ it's alive.
 ```bash
 PYTHONPATH=src python scripts/replay.py                  # yesterday
 PYTHONPATH=src python scripts/replay.py --date 2026-05-12
-PYTHONPATH=src python scripts/replay.py --days 10        # last 10 trading days
+PYTHONPATH=src python scripts/replay.py --days 250       # last ~year
+PYTHONPATH=src python scripts/replay.py --days 90 --no-persist   # console-only
 ```
 
 Fetches 1-min IEX bars for the chosen day(s), feeds them through the same
 strategy + risk gate that the live runner uses, then simulates fills against
-the rest of that day. Prints a per-trade table with entry, exit, P&L, and the
-trade's R-multiple, plus a summary by symbol.
+the rest of that day. Prints a per-trade table to the console **and** writes
+the run + every trade to the database. The dashboard's "Latest replay" panel
+shows the most recent run's summary + trade list.
 
 This is **not** a real backtest — fills are idealistic (entry at the breakout
 bar's close, exits at exact stop or target). It's for sanity-checking the

@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Any
 
 from trident.audit.log import configure_logging, get_logger
+from trident.backtest.persistence import save_replay
 from trident.backtest.simulator import SimulatedTrade, simulate_trade
 from trident.clock import ET, is_trading_day
 from trident.data.bars import Bar, BarStore
@@ -214,6 +215,11 @@ def main() -> int:
         default=Decimal("100000"),
         help="Account equity to size positions against. Default: 100000.",
     )
+    parser.add_argument(
+        "--no-persist",
+        action="store_true",
+        help="Skip writing results to the database (dashboard won't see them).",
+    )
     args = parser.parse_args()
 
     configure_logging()
@@ -249,6 +255,19 @@ def main() -> int:
         all_trades.extend(trades)
 
     print_report(all_trades)
+
+    if not args.no_persist and all_trades:
+        from datetime import datetime as _dt
+
+        run_id = save_replay(
+            days=[_dt(d.year, d.month, d.day, tzinfo=UTC) for d in days],
+            equity=args.equity,
+            watchlist=WATCHLIST,
+            strategy="orb_5m",
+            trades=all_trades,
+        )
+        log.info("replay_persisted", run_id=str(run_id), trades=len(all_trades))
+        print(f"Saved replay run {run_id} ({len(all_trades)} trades). Open the dashboard to view.")
     return 0
 
 

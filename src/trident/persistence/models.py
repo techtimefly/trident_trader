@@ -141,3 +141,45 @@ class SystemState(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(String(1024))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ReplayRun(Base):
+    """One row per `scripts/replay.py` invocation."""
+
+    __tablename__ = "replay_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    first_day: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_day: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    days: Mapped[int] = mapped_column()
+    equity: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    watchlist: Mapped[dict[str, Any]] = mapped_column(JSON)
+    strategy: Mapped[str] = mapped_column(String(64))
+    num_trades: Mapped[int] = mapped_column()
+    wins: Mapped[int] = mapped_column()
+    losses: Mapped[int] = mapped_column()
+    total_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    avg_r: Mapped[Decimal] = mapped_column(Numeric(8, 4))
+
+
+class ReplayTrade(Base):
+    __tablename__ = "replay_trades"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("replay_runs.id"), index=True
+    )
+    trade_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    side: Mapped[str] = mapped_column(String(8))
+    qty: Mapped[int] = mapped_column()
+    entry_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    entry_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    stop_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    target_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    exit_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    exit_reason: Mapped[str] = mapped_column(String(16))
+    exit_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    r_multiple: Mapped[Decimal] = mapped_column(Numeric(8, 4))

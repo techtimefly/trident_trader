@@ -138,6 +138,22 @@
 
         <section class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <h2 class="text-sm font-semibold tracking-tight">Latest replay</h2>
+                    <span class="pill pill-dim">simulation</span>
+                </div>
+            </div>
+            <div
+                id="replay"
+                hx-get="/api/replay"
+                hx-trigger="load, every 30s"
+                hx-swap="innerHTML">
+                <div class="skeleton h-32 m-4 rounded-md"></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <h2 class="text-sm font-semibold tracking-tight">Recent audit events</h2>
                 <span class="pill pill-dim">last 24h</span>
             </div>

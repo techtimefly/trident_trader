@@ -22,7 +22,13 @@ from sqlalchemy import select
 from trident.audit.log import configure_logging
 from trident.clock import ET, is_market_open, now_et
 from trident.dashboard.alpaca_view import get_account, list_positions
-from trident.persistence.models import AuditEvent, Order as OrderModel, Signal
+from trident.persistence.models import (
+    AuditEvent,
+    Order as OrderModel,
+    ReplayRun,
+    ReplayTrade,
+    Signal,
+)
 from trident.persistence.session import session_scope
 from trident.persistence.state import (
     kill_switch_engaged,
@@ -206,3 +212,58 @@ def api_kill_engage() -> Any:
 def api_kill_release() -> Any:
     set_kill_switch(False, actor="dashboard")
     return {"engaged": False}
+
+
+@app.get("/api/replay", response_class=HTMLResponse)
+def api_replay(request: Request) -> Any:
+    with session_scope() as s:
+        latest = s.scalars(
+            select(ReplayRun).order_by(ReplayRun.started_at.desc()).limit(1)
+        ).first()
+        if latest is None:
+            return templates.TemplateResponse(request, "_replay.html", {"run": None, "rows": []})
+
+        trades = list(
+            s.scalars(
+                select(ReplayTrade)
+                .where(ReplayTrade.run_id == latest.id)
+                .order_by(ReplayTrade.entry_ts)
+            )
+        )
+        rows = [
+            {
+                "date": t.entry_ts.astimezone(ET).strftime("%Y-%m-%d"),
+                "time": t.entry_ts.astimezone(ET).strftime("%H:%M"),
+                "symbol": t.symbol,
+                "side": t.side,
+                "qty": t.qty,
+                "entry": _fmt_money(t.entry_price),
+                "exit": _fmt_money(t.exit_price),
+                "exit_reason": t.exit_reason,
+                "pnl": _fmt_money(t.pnl),
+                "r": f"{t.r_multiple:+.2f}",
+                "pl_positive": t.pnl >= 0,
+                "is_target": t.exit_reason == "target",
+                "is_stop": t.exit_reason == "stop",
+                "is_eod": t.exit_reason == "eod",
+            }
+            for t in trades
+        ]
+        win_rate = (
+            float(latest.wins) / float(latest.num_trades) * 100.0 if latest.num_trades else 0.0
+        )
+        run_view = {
+            "first_day": latest.first_day.astimezone(ET).strftime("%Y-%m-%d"),
+            "last_day": latest.last_day.astimezone(ET).strftime("%Y-%m-%d"),
+            "days": latest.days,
+            "num_trades": latest.num_trades,
+            "wins": latest.wins,
+            "losses": latest.losses,
+            "win_rate": f"{win_rate:.1f}%",
+            "total_pnl": _fmt_money(latest.total_pnl),
+            "total_pnl_positive": latest.total_pnl >= 0,
+            "avg_r": f"{latest.avg_r:+.2f}",
+            "started_at": latest.started_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
+            "strategy": latest.strategy,
+        }
+    return templates.TemplateResponse(request, "_replay.html", {"run": run_view, "rows": rows})

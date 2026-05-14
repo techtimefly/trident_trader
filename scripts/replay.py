@@ -1,0 +1,256 @@
+"""Replay historical 1-min bars through the strategy + risk gate, then simulate
+fills against the rest of the day. Prints a per-trade report and a summary.
+
+This is NOT a backtest — fills are idealistic (entry = bar close, exits at exact
+stop/target with no slippage). Its purpose is to let you sanity-check that the
+strategy fires on real data and to see what its trades would have looked like
+without waiting for the next market open.
+
+Examples:
+    PYTHONPATH=src python scripts/replay.py                       # yesterday
+    PYTHONPATH=src python scripts/replay.py --date 2026-05-12
+    PYTHONPATH=src python scripts/replay.py --days 10             # last 10 trading days
+"""
+from __future__ import annotations
+
+import argparse
+from collections import defaultdict
+from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
+from typing import Any
+
+from trident.audit.log import configure_logging, get_logger
+from trident.backtest.simulator import SimulatedTrade, simulate_trade
+from trident.clock import ET, is_trading_day
+from trident.data.bars import Bar, BarStore
+from trident.risk.gate import AccountState, MarketState, evaluate
+from trident.risk.limits import RiskLimits
+from trident.settings import get_settings
+from trident.strategies.orb import OpeningRangeBreakout
+
+WATCHLIST = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD"]
+
+
+def fetch_minute_bars(start: datetime, end: datetime, symbols: list[str]) -> list[Bar]:
+    settings = get_settings()
+    from alpaca.data.enums import DataFeed
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
+    client = StockHistoricalDataClient(settings.alpaca_api_key, settings.alpaca_api_secret)
+    feed = DataFeed.IEX if settings.alpaca_data_feed.lower() == "iex" else DataFeed.SIP
+    req = StockBarsRequest(
+        symbol_or_symbols=symbols,
+        start=start,
+        end=end,
+        timeframe=TimeFrame(1, TimeFrameUnit.Minute),
+        feed=feed,
+    )
+    resp = client.get_stock_bars(req)
+    out: list[Bar] = []
+    for sym in symbols:
+        bars = resp.data.get(sym, [])
+        for b in bars:
+            out.append(
+                Bar(
+                    symbol=sym,
+                    ts=b.timestamp.astimezone(UTC),
+                    timeframe="1min",
+                    open=Decimal(str(b.open)),
+                    high=Decimal(str(b.high)),
+                    low=Decimal(str(b.low)),
+                    close=Decimal(str(b.close)),
+                    volume=int(b.volume),
+                )
+            )
+    out.sort(key=lambda b: b.ts)
+    return out
+
+
+def trading_days_back(end: date, n: int) -> list[date]:
+    days: list[date] = []
+    d = end
+    while len(days) < n:
+        if is_trading_day(d):
+            days.append(d)
+        d = d - timedelta(days=1)
+    return list(reversed(days))
+
+
+def replay_one_day(d: date, equity: Decimal, limits: RiskLimits, log: Any) -> list[SimulatedTrade]:
+    """Run the strategy + gate over one historical trading day and simulate fills."""
+    start = datetime.combine(d, time(8, 0), tzinfo=ET).astimezone(UTC)
+    end = datetime.combine(d, time(20, 0), tzinfo=ET).astimezone(UTC)
+    bars = fetch_minute_bars(start, end, WATCHLIST)
+    if not bars:
+        log.warning("no_bars_for_day", date=d.isoformat())
+        return []
+
+    strategy = OpeningRangeBreakout(symbols=WATCHLIST)
+    store = BarStore()
+    trades: list[SimulatedTrade] = []
+
+    for bar in bars:
+        store.append(bar)
+        sig = strategy.on_bar(bar, store)
+        if sig is None:
+            continue
+
+        bar_et = bar.ts.astimezone(ET)
+        # Replay treats every signal as if no positions are currently open. The
+        # strategy itself enforces one entry per symbol per day, so we won't
+        # double-up; we simply ignore the gate's max_concurrent_positions check
+        # since we are not tracking real-time fills as the day progresses.
+        account = AccountState(
+            equity=equity,
+            starting_equity_today=equity,
+            buying_power=equity * Decimal("2"),
+            open_positions={},
+        )
+        market = MarketState()
+        decision = evaluate(
+            sig, account, market, limits, time(bar_et.hour, bar_et.minute)
+        )
+        if not decision.approved:
+            log.info(
+                "signal_rejected",
+                date=d.isoformat(),
+                symbol=sig.symbol,
+                reason=decision.reason,
+            )
+            continue
+
+        # Replay sizing uses the gate's chosen share count.
+        followups = [b for b in bars if b.symbol == sig.symbol and b.ts > sig.ts]
+        trade = simulate_trade(sig, decision.shares, followups)
+        if trade is not None:
+            trades.append(trade)
+            log.info(
+                "simulated_trade",
+                date=d.isoformat(),
+                symbol=sig.symbol,
+                qty=trade.qty,
+                entry=str(trade.entry_price),
+                exit_reason=trade.exit_reason,
+                exit_price=str(trade.exit_price),
+                pnl=str(trade.pnl),
+                r=f"{trade.r_multiple:.2f}",
+            )
+    return trades
+
+
+def fmt_money(d: Decimal) -> str:
+    sign = "-" if d < 0 else ""
+    return f"{sign}${abs(d):,.2f}"
+
+
+def print_report(trades: list[SimulatedTrade]) -> None:
+    if not trades:
+        print("\nNo trades simulated. Either the day was a holiday/weekend, the bars")
+        print("did not include a valid opening range, or no breakouts met the volume filter.\n")
+        return
+
+    by_exit: dict[str, int] = defaultdict(int)
+    by_symbol_pnl: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    total_pnl = Decimal("0")
+    wins = 0
+    losses = 0
+    r_sum = Decimal("0")
+
+    print("\n" + "=" * 88)
+    print(f"{'Time (ET)':<22}{'Sym':<6}{'Side':<6}{'Qty':>5}{'Entry':>10}{'Exit':>10}{'Why':>8}{'P&L':>14}{'R':>6}")
+    print("-" * 88)
+    for t in sorted(trades, key=lambda x: x.signal.ts):
+        et_ts = t.signal.ts.astimezone(ET).strftime("%Y-%m-%d %H:%M")
+        print(
+            f"{et_ts:<22}"
+            f"{t.signal.symbol:<6}"
+            f"{t.signal.side:<6}"
+            f"{t.qty:>5}"
+            f"{str(t.entry_price):>10}"
+            f"{str(t.exit_price):>10}"
+            f"{t.exit_reason:>8}"
+            f"{fmt_money(t.pnl):>14}"
+            f"{t.r_multiple:>6.2f}"
+        )
+        by_exit[t.exit_reason] += 1
+        by_symbol_pnl[t.signal.symbol] += t.pnl
+        total_pnl += t.pnl
+        r_sum += t.r_multiple
+        if t.pnl > 0:
+            wins += 1
+        elif t.pnl < 0:
+            losses += 1
+    print("-" * 88)
+
+    n = len(trades)
+    win_rate = (Decimal(wins) / Decimal(n) * Decimal("100")) if n else Decimal("0")
+    avg_r = (r_sum / Decimal(n)) if n else Decimal("0")
+    print(f"Trades: {n}   wins {wins}   losses {losses}   win rate {win_rate:.1f}%")
+    print(f"Exits: " + "  ".join(f"{k}={v}" for k, v in sorted(by_exit.items())))
+    print(f"By symbol: " + "  ".join(f"{s}={fmt_money(p)}" for s, p in sorted(by_symbol_pnl.items())))
+    print(f"Total P&L (no fees, no slippage): {fmt_money(total_pnl)}   avg R {avg_r:+.2f}")
+    print("=" * 88)
+    print()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Replay historical bars through the strategy.")
+    parser.add_argument(
+        "--date",
+        type=lambda s: date.fromisoformat(s),
+        help="Specific trading day, YYYY-MM-DD. Defaults to the most recent past trading day.",
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=1,
+        help="Replay the last N trading days (ignored if --date is given). Default: 1.",
+    )
+    parser.add_argument(
+        "--equity",
+        type=lambda s: Decimal(s),
+        default=Decimal("100000"),
+        help="Account equity to size positions against. Default: 100000.",
+    )
+    args = parser.parse_args()
+
+    configure_logging()
+    log = get_logger("replay")
+    settings = get_settings()
+    if not settings.alpaca_api_key:
+        log.error("missing_alpaca_credentials")
+        return 1
+
+    limits = RiskLimits(
+        risk_per_trade_pct=settings.risk_per_trade_pct,
+        daily_loss_limit_pct=settings.daily_loss_limit_pct,
+        max_concurrent_positions=settings.max_concurrent_positions,
+    )
+
+    if args.date:
+        days = [args.date] if is_trading_day(args.date) else []
+        if not days:
+            log.error("not_a_trading_day", date=args.date.isoformat())
+            return 1
+    else:
+        # Most recent past trading day, or N back.
+        today = datetime.now(ET).date()
+        anchor = today - timedelta(days=1)
+        while not is_trading_day(anchor):
+            anchor = anchor - timedelta(days=1)
+        days = trading_days_back(anchor, args.days)
+
+    log.info("replay_starting", days=[d.isoformat() for d in days])
+    all_trades: list[SimulatedTrade] = []
+    for d in days:
+        trades = replay_one_day(d, args.equity, limits, log)
+        all_trades.extend(trades)
+
+    print_report(all_trades)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

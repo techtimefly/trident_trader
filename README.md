@@ -77,6 +77,25 @@ ORB strategy, and logs every signal + risk-gate decision. **No orders are placed
 The runner writes a heartbeat every 5 seconds so the dashboard can show whether
 it's alive.
 
+### 6a. Replay against historical days (no waiting for the open)
+
+```bash
+PYTHONPATH=src python scripts/replay.py                  # yesterday
+PYTHONPATH=src python scripts/replay.py --date 2026-05-12
+PYTHONPATH=src python scripts/replay.py --days 10        # last 10 trading days
+```
+
+Fetches 1-min IEX bars for the chosen day(s), feeds them through the same
+strategy + risk gate that the live runner uses, then simulates fills against
+the rest of that day. Prints a per-trade table with entry, exit, P&L, and the
+trade's R-multiple, plus a summary by symbol.
+
+This is **not** a real backtest — fills are idealistic (entry at the breakout
+bar's close, exits at exact stop or target). It's for sanity-checking the
+strategy on recent data and getting comfortable with the output shape before
+the next session opens. The honest backtest harness (slippage, fees,
+walk-forward) lands in v0.3.
+
 ### 6b. Paper run (real bracket orders to the paper account)
 
 > Use this only after a week or more of clean shadow runs. The two scripts
@@ -160,11 +179,12 @@ src/trident/
   execution/           # Broker protocol + Alpaca adapter + bracket orders
   portfolio/           # order tracking + position reconciliation
   safety/              # EOD flatten
+  backtest/            # idealistic fill simulator used by replay
   audit/               # append-only event log + structured logging
   persistence/         # SQLAlchemy models + migrations + kill switch state
   dashboard/           # FastAPI + HTMX dashboard (localhost only)
 tests/unit/            # pure-function tests for the safety-critical code
-scripts/               # smoke_test, shadow_run, paper_run, deadman,
+scripts/               # smoke_test, shadow_run, replay, paper_run, deadman,
                        # run_dashboard, backfill_daily
 ```
 

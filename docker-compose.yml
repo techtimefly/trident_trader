@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: trident-postgres
+    environment:
+      POSTGRES_USER: trident
+      POSTGRES_PASSWORD: trident
+      POSTGRES_DB: trident
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trident -d trident"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

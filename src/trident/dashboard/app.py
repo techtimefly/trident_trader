@@ -71,16 +71,16 @@ def _bot_status() -> dict[str, Any]:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> Any:
-    return templates.TemplateResponse(request, "index.html", {})
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/api/hero", response_class=HTMLResponse)
 def api_hero(request: Request) -> Any:
     account = get_account()
     return templates.TemplateResponse(
-        request,
         "_hero.html",
         {
+            "request": request,
             "account": account,
             "equity_fmt": _fmt_money(account.equity) if account else "—",
             "buying_power_fmt": _fmt_money(account.buying_power) if account else "—",
@@ -109,7 +109,7 @@ def api_positions(request: Request) -> Any:
         }
         for p in positions
     ]
-    return templates.TemplateResponse(request, "_positions.html", {"rows": rows})
+    return templates.TemplateResponse("_positions.html", {"request": request, "rows": rows})
 
 
 @app.get("/api/signals", response_class=HTMLResponse)
@@ -135,7 +135,7 @@ def api_signals(request: Request) -> Any:
             }
             for r in rows
         ]
-    return templates.TemplateResponse(request, "_signals.html", {"rows": rendered})
+    return templates.TemplateResponse("_signals.html", {"request": request, "rows": rendered})
 
 
 @app.get("/api/orders", response_class=HTMLResponse)
@@ -166,7 +166,7 @@ def api_orders(request: Request) -> Any:
             }
             for r in rows
         ]
-    return templates.TemplateResponse(request, "_orders.html", {"rows": rendered})
+    return templates.TemplateResponse("_orders.html", {"request": request, "rows": rendered})
 
 
 @app.get("/api/audit", response_class=HTMLResponse)
@@ -189,7 +189,7 @@ def api_audit(request: Request) -> Any:
             }
             for r in rows
         ]
-    return templates.TemplateResponse(request, "_audit.html", {"rows": rendered})
+    return templates.TemplateResponse("_audit.html", {"request": request, "rows": rendered})
 
 
 def _summarize_payload(payload: dict[str, Any]) -> str:
@@ -221,7 +221,9 @@ def api_replay(request: Request) -> Any:
             select(ReplayRun).order_by(ReplayRun.started_at.desc()).limit(1)
         ).first()
         if latest is None:
-            return templates.TemplateResponse(request, "_replay.html", {"run": None, "rows": []})
+            return templates.TemplateResponse(
+                "_replay.html", {"request": request, "run": None, "rows": []}
+            )
 
         trades = list(
             s.scalars(
@@ -266,4 +268,6 @@ def api_replay(request: Request) -> Any:
             "started_at": latest.started_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
             "strategy": latest.strategy,
         }
-    return templates.TemplateResponse(request, "_replay.html", {"run": run_view, "rows": rows})
+    return templates.TemplateResponse(
+        "_replay.html", {"request": request, "run": run_view, "rows": rows}
+    )

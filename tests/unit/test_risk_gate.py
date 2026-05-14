@@ -155,12 +155,30 @@ def test_rejects_insufficient_buying_power() -> None:
     assert d.reason == "insufficient_buying_power"
 
 
-def test_rejects_oversized_position() -> None:
-    # equity 10k, max_position_notional_pct 25% = 2500; risk=2 stop dist → with 1% (100$)
-    # and 0.10 stop distance → 1000 shares * 100 entry = 100k notional > cap.
+def test_sizes_down_to_notional_cap() -> None:
+    # equity 10k, default 50% cap = $5000 notional max. Risk-budget would buy 1000
+    # shares (1% / $0.10 stop) but $5000 / $100 = 50 shares max. We expect approval
+    # with 50 shares — the trade still happens, just smaller.
     account = make_account(equity="10000", starting="10000", buying_power="10000000")
     d = evaluate(
         make_signal(entry="100", stop="99.90", target="105"),
+        account,
+        MarketState(),
+        DEFAULTS,
+        GOOD_TIME,
+    )
+    assert d.approved
+    assert d.shares == 50
+    assert "sized down" in d.detail
+
+
+def test_rejects_when_even_one_share_exceeds_notional_cap() -> None:
+    # Equity $100, 50% cap = $50 max notional. Entry $60 — even 1 share blows the cap.
+    # Risk-budget would buy 1 share (1% of $100 = $1, stop dist $1 → 1 share) so we
+    # exercise the rejection branch rather than zero_shares.
+    account = make_account(equity="100", starting="100", buying_power="1000")
+    d = evaluate(
+        make_signal(entry="60", stop="59", target="62"),
         account,
         MarketState(),
         DEFAULTS,

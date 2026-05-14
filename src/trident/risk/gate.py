@@ -124,14 +124,29 @@ def evaluate(
             f"Avg daily volume {market.avg_daily_volume} < min {limits.min_avg_daily_volume}.",
         )
 
-    shares = position_size(
+    shares_by_risk = position_size(
         account_equity=account.equity,
         risk_per_trade_pct=limits.risk_per_trade_pct,
         entry_price=signal.entry_price,
         stop_price=signal.stop_price,
     )
-    if shares <= 0:
+    if shares_by_risk <= 0:
         return _reject("zero_shares", "Position sizing returned zero shares.")
+
+    # Cap by max-notional concentration. If risk-budget would buy more shares
+    # than the notional cap allows, size DOWN. The trade still happens; the
+    # realized risk just ends up below the per-trade budget. Rejecting here
+    # would silently drop every ORB signal on a high-priced name.
+    max_notional = account.equity * (limits.max_position_notional_pct / Decimal("100"))
+    shares_by_notional = int(max_notional / signal.entry_price)
+    shares = min(shares_by_risk, shares_by_notional)
+    sized_down = shares < shares_by_risk
+
+    if shares <= 0:
+        return _reject(
+            "position_too_large",
+            f"Even one share at {signal.entry_price} exceeds notional cap {max_notional:.2f}.",
+        )
 
     if not position_fits_buying_power(shares, signal.entry_price, account.buying_power):
         return _reject(
@@ -139,17 +154,13 @@ def evaluate(
             f"Need ~{shares * signal.entry_price:.2f}; have {account.buying_power}.",
         )
 
-    notional = position_notional(shares, signal.entry_price)
-    max_notional = account.equity * (limits.max_position_notional_pct / Decimal("100"))
-    if notional > max_notional:
-        return _reject(
-            "position_too_large",
-            f"Notional {notional:.2f} exceeds cap {max_notional:.2f}.",
-        )
+    detail = f"Approved {shares} shares of {signal.symbol} @ {signal.entry_price}."
+    if sized_down:
+        detail += f" (sized down from {shares_by_risk} to fit {limits.max_position_notional_pct}% notional cap)"
 
     return GateDecision(
         approved=True,
         reason="ok",
-        detail=f"Approved {shares} shares of {signal.symbol} @ {signal.entry_price}.",
+        detail=detail,
         shares=shares,
     )

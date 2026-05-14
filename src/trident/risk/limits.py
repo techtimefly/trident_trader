@@ -12,7 +12,11 @@ class RiskLimits:
     risk_per_trade_pct: Decimal = Decimal("1.0")
     daily_loss_limit_pct: Decimal = Decimal("2.0")
     max_concurrent_positions: int = 3
-    max_position_notional_pct: Decimal = Decimal("25")  # no single position > 25% of equity
+    # Day-trades on liquid large-caps with tight ORB stops routinely size into
+    # large notionals (e.g., 1% of $100k = $1000 risk / $0.50 stop = $200k notional).
+    # The cap is a concentration backstop, not the primary safety. Gate sizes DOWN
+    # to fit; the risk-per-trade budget then becomes the binding constraint.
+    max_position_notional_pct: Decimal = Decimal("50")
     no_entry_before: time = time(9, 35)
     no_entry_after: time = time(11, 0)
     max_spread_pct: Decimal = Decimal("0.2")  # refuse if (ask - bid) / mid > 0.2%

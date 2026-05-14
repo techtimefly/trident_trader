@@ -4,13 +4,19 @@ Rules:
   - Opening range = high/low of the first five 1-min bars (9:30 ET through 9:34 ET inclusive).
   - Long entry when a 1-min bar closes above OR high AND the breakout bar's volume
     is at least 1.5x the average minute-volume of the OR.
-  - Stop at OR low. Target at entry + (OR high - OR low) = 1R.
+  - Stop at OR low. Target = entry + (entry - stop), i.e. a true 1R from entry.
   - At most one entry per symbol per day.
   - No entries before 9:35 ET or after 11:00 ET.
   - If we missed any of the five OR bars, skip the symbol for the day.
 
+Target geometry note: an earlier version of this file set target = entry + OR_range.
+Because the breakout bar's close sits above OR_high, that gave a target less than 1R
+from entry, biasing realized R-multiples toward 0.5-0.8 even on full target hits. The
+current geometry pins the target a true 1R above entry so target hits give +1.0R and
+the break-even win rate is the intuitive ~50% (ignoring EOD-flatten drift).
+
 These rules are intentionally simple. Variations (volume vs 20-day avg, multi-target
-scaling, short side) are explicit TODOs for v0.2 — easier to debug one thing at a time.
+scaling, short side) are explicit TODOs for v0.3 — easier to debug one thing at a time.
 """
 from __future__ import annotations
 
@@ -94,8 +100,8 @@ class OpeningRangeBreakout:
 
         entry = bar.close
         stop = state.or_low
-        or_range = state.or_high - state.or_low
-        target = entry + or_range
+        risk_per_share = entry - stop
+        target = entry + risk_per_share  # true 1R from entry
 
         state.entered = True
         return Signal(
@@ -109,8 +115,10 @@ class OpeningRangeBreakout:
             meta={
                 "or_high": str(state.or_high),
                 "or_low": str(state.or_low),
+                "or_range": str(state.or_high - state.or_low),
                 "or_avg_volume": str(state.or_avg_volume),
                 "breakout_volume": bar.volume,
+                "risk_per_share": str(risk_per_share),
             },
         )
 

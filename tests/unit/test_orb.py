@@ -83,7 +83,9 @@ def test_breakout_signal_after_or() -> None:
     assert signal.side == "long"
     assert signal.entry_price == Decimal("101.50")
     assert signal.stop_price == Decimal("99.0")
-    assert signal.target_price == Decimal("101.50") + (Decimal("101.0") - Decimal("99.0"))
+    # Target is 1R above entry: entry + (entry - stop) = 101.50 + 2.50 = 104.00
+    assert signal.target_price == Decimal("104.00")
+    assert signal.reward_to_risk == Decimal("1")
 
 
 def test_at_most_one_entry_per_day() -> None:

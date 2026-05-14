@@ -3,8 +3,9 @@ from __future__ import annotations
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +31,27 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_dir: Path = Path("./logs")
     environment: str = "development"
+
+    @field_validator("account_equity_override", mode="before")
+    @classmethod
+    def _blank_or_comment_to_none(cls, v: Any) -> Any:
+        """Tolerate an empty or stray-comment value in .env (a common foot-gun)."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            if not s or s.startswith("#"):
+                return None
+        return v
+
+    @field_validator("alpaca_data_feed", "log_level", "environment", mode="before")
+    @classmethod
+    def _strip_trailing_comment(cls, v: Any) -> Any:
+        """Strip a trailing `# ...` comment so .env inline comments don't poison strings."""
+        if isinstance(v, str) and "#" in v:
+            head, _, _ = v.partition("#")
+            return head.strip()
+        return v
 
     @property
     def is_paper(self) -> bool:

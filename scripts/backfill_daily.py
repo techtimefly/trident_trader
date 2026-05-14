@@ -29,11 +29,14 @@ def main() -> int:
         log.error("missing_alpaca_credentials")
         return 1
 
+    from alpaca.data.enums import DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
 
     client = StockHistoricalDataClient(settings.alpaca_api_key, settings.alpaca_api_secret)
+
+    feed = DataFeed.IEX if settings.alpaca_data_feed.lower() == "iex" else DataFeed.SIP
 
     end = datetime.now(UTC)
     start = end - timedelta(days=days * 2)  # over-fetch to account for weekends/holidays
@@ -45,6 +48,7 @@ def main() -> int:
             start=start,
             end=end,
             timeframe=TimeFrame.Day,
+            feed=feed,
         )
         bars_resp = client.get_stock_bars(req)
         bars = bars_resp.data.get(symbol, [])

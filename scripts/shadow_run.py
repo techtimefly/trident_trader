@@ -1,8 +1,9 @@
 """Run the ORB strategy against live Alpaca paper data, but DO NOT submit orders.
 
-Every signal is logged + run through the risk gate; the gate decision is recorded.
-This is the safety habit: spend a few weeks watching what the bot would have done
-before ever flipping the switch to real execution.
+Every signal is logged + run through the risk gate; the gate decision is recorded
+on both the audit log and the signals table. A heartbeat is written every 5s so
+the dashboard knows the bot is alive. The kill switch (toggled from the dashboard)
+is checked before every gate evaluation — when engaged, the gate rejects.
 
 Usage:
     PYTHONPATH=src python3 scripts/shadow_run.py
@@ -19,12 +20,16 @@ from trident.clock import is_market_open, now_et
 from trident.data.bars import Bar, BarStore
 from trident.data.feed import AlpacaBarFeed
 from trident.data.persistence import persist_bar
+from trident.persistence.models import Signal as SignalRow
+from trident.persistence.session import session_scope
+from trident.persistence.state import kill_switch_engaged, write_heartbeat
 from trident.risk.gate import AccountState, MarketState, evaluate
 from trident.risk.limits import RiskLimits
 from trident.settings import get_settings
 from trident.strategies.orb import OpeningRangeBreakout
 
 WATCHLIST = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD"]
+HEARTBEAT_INTERVAL_SECONDS = 5
 
 
 async def main() -> None:
@@ -60,11 +65,29 @@ async def main() -> None:
         account = AccountState(
             equity=starting_equity,
             starting_equity_today=starting_equity,
-            buying_power=starting_equity * Decimal("2"),  # paper margin approximation
+            buying_power=starting_equity * Decimal("2"),
             open_positions={},
         )
-        market = MarketState()  # no live quotes plumbed in v0.1 shadow run
+        market = MarketState(kill_switch_active=kill_switch_engaged())
         decision = evaluate(sig, account, market, limits, dtime(et.hour, et.minute))
+
+        # Persist signal + decision together. The audit log entry is the canonical record;
+        # the signals row is for fast queries from the dashboard.
+        with session_scope() as s:
+            s.add(
+                SignalRow(
+                    ts=sig.ts,
+                    strategy=sig.strategy,
+                    symbol=sig.symbol,
+                    side=sig.side,
+                    entry_price=sig.entry_price,
+                    stop_price=sig.stop_price,
+                    target_price=sig.target_price,
+                    meta=sig.meta,
+                    gate_decision="approved" if decision.approved else "rejected",
+                    gate_reason=decision.reason,
+                )
+            )
 
         record(
             "signal_generated",
@@ -120,9 +143,23 @@ async def main() -> None:
     for sig_name in (os_signal.SIGINT, os_signal.SIGTERM):
         loop.add_signal_handler(sig_name, _stop)
 
+    async def heartbeat_loop() -> None:
+        while not stop_event.is_set():
+            try:
+                write_heartbeat()
+            except Exception:
+                log.exception("heartbeat_failed")
+            try:
+                await asyncio.wait_for(stop_event.wait(), HEARTBEAT_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+
     feed_task = asyncio.create_task(feed.run())
+    hb_task = asyncio.create_task(heartbeat_loop())
+
     await stop_event.wait()
     feed_task.cancel()
+    hb_task.cancel()
     log.info("shadow_run_complete")
 
 
@@ -139,9 +176,9 @@ async def _fetch_starting_equity(settings) -> Decimal:  # type: ignore[no-untype
         )
         return Decimal(str(client.get_account().equity))
     except Exception:
-        return Decimal("100000")  # paper default fallback
+        return Decimal("100000")
 
 
 if __name__ == "__main__":
-    _ = is_market_open()  # informational; the strategy itself enforces session windows
+    _ = is_market_open()
     asyncio.run(main())

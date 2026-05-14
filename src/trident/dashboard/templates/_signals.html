@@ -1,0 +1,41 @@
+{% if rows %}
+<table class="tt mono text-sm">
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Entry</th>
+            <th>Stop</th>
+            <th>Target</th>
+            <th>Gate</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="dim">{{ r.ts }}</td>
+            <td class="font-semibold">{{ r.symbol }}</td>
+            <td>{{ r.side }}</td>
+            <td>{{ r.entry }}</td>
+            <td class="neg">{{ r.stop }}</td>
+            <td class="pos">{{ r.target }}</td>
+            <td>
+                {% if r.approved %}
+                    <span class="pill pill-green">approved</span>
+                {% elif r.decision == "—" %}
+                    <span class="pill pill-dim">pending</span>
+                {% else %}
+                    <span class="pill pill-red" title="{{ r.reason }}">{{ r.decision }}</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">
+    No signals today. ORB needs the first five 1-min bars from 9:30 ET before it can fire,
+    and only one entry per symbol per day.
+</div>
+{% endif %}

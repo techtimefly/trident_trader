@@ -1,0 +1,28 @@
+{% if rows %}
+<table class="tt mono text-sm">
+    <thead>
+        <tr>
+            <th>Symbol</th>
+            <th>Qty</th>
+            <th>Avg entry</th>
+            <th>Current</th>
+            <th>P/L</th>
+            <th>%</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="font-semibold">{{ r.symbol }}</td>
+            <td>{{ r.qty }} <span class="dim">{{ r.side }}</span></td>
+            <td>{{ r.avg_entry }}</td>
+            <td>{{ r.current }}</td>
+            <td class="{{ 'pos' if r.pl_positive else 'neg' }}">{{ r.pl }}</td>
+            <td class="{{ 'pos' if r.pl_positive else 'neg' }}">{{ r.plpc }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">No open positions.</div>
+{% endif %}

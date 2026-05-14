@@ -131,3 +131,13 @@ class DailyAccountSnapshot(Base):
     current_equity: Mapped[Decimal] = mapped_column(Numeric(18, 6))
     realized_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=Decimal("0"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SystemState(Base):
+    """Tiny key/value table. Holds the kill switch flag and the shadow-run heartbeat."""
+
+    __tablename__ = "system_state"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(1024))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -1,0 +1,62 @@
+{% set bot_label = bot.label %}
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+    <div>
+        <div class="text-xs dim uppercase tracking-widest">Account equity</div>
+        <div class="mono text-3xl font-semibold mt-1">{{ equity_fmt }}</div>
+        <div class="text-xs dim mt-1 mono">
+            cash {{ cash_fmt }} &middot; bp {{ buying_power_fmt }}
+        </div>
+    </div>
+
+    <div>
+        <div class="text-xs dim uppercase tracking-widest">Market</div>
+        <div class="mt-1 flex items-center gap-2">
+            {% if market_open %}
+                <span class="dot dot-green"></span>
+                <span class="text-base font-medium">Open</span>
+            {% else %}
+                <span class="dot dot-dim"></span>
+                <span class="text-base font-medium">Closed</span>
+            {% endif %}
+        </div>
+        <div class="text-xs dim mt-1 mono">{{ et_now }}</div>
+    </div>
+
+    <div>
+        <div class="text-xs dim uppercase tracking-widest">Bot</div>
+        <div class="mt-1 flex items-center gap-2">
+            {% if bot_label == "running" %}
+                <span class="dot dot-green"></span>
+                <span class="text-base font-medium">Running</span>
+            {% elif bot_label == "stale" %}
+                <span class="dot dot-amber"></span>
+                <span class="text-base font-medium">Stale</span>
+            {% else %}
+                <span class="dot dot-dim"></span>
+                <span class="text-base font-medium">Idle</span>
+            {% endif %}
+        </div>
+        <div class="text-xs dim mt-1 mono">
+            {% if bot.age_seconds is not none %}
+                heartbeat {{ bot.age_seconds }}s ago
+            {% else %}
+                no heartbeat yet
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="text-right">
+        <div class="text-xs dim uppercase tracking-widest mb-2">Kill switch</div>
+        {% if kill %}
+            <span class="pill pill-red mb-2"><span class="dot dot-red"></span> Engaged</span>
+            <form hx-post="/api/kill/release" hx-target="#hero" hx-swap="innerHTML" class="mt-2">
+                <button class="btn btn-ghost text-sm" type="submit">Release</button>
+            </form>
+        {% else %}
+            <span class="pill pill-green mb-2"><span class="dot dot-green"></span> Armed</span>
+            <form hx-post="/api/kill" hx-target="#hero" hx-swap="innerHTML" class="mt-2">
+                <button class="btn btn-danger text-sm" type="submit">Engage kill switch</button>
+            </form>
+        {% endif %}
+    </div>
+</div>

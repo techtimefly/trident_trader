@@ -70,20 +70,38 @@ PYTHONPATH=src python scripts/shadow_run.py
 
 This connects to Alpaca's WebSocket bar feed during US market hours, runs the
 ORB strategy, and logs every signal + risk-gate decision. **No orders are placed.**
+The runner writes a heartbeat every 5 seconds so the dashboard can show whether
+it's alive.
 
-Tail the JSON log:
+### 7. Dashboard
+
+In a second terminal:
+
+```bash
+PYTHONPATH=src python scripts/run_dashboard.py
+```
+
+Open <http://127.0.0.1:8765>. The page shows:
+- Account equity, cash, buying power (live from Alpaca).
+- Market open/closed indicator and a heartbeat-based bot status.
+- Open positions in the Alpaca paper account.
+- Today's signals with the gate decision next to each.
+- The last 24 hours of audit events.
+- A red **kill switch** button. Engaging it makes the gate reject every new
+  signal until you release it. The toggle is persisted to the `system_state`
+  table so the shadow runner sees it without needing a restart.
+
+The dashboard binds to `127.0.0.1` only. To access from another device, use
+Tailscale (`tailscale serve`) or SSH port-forwarding — do not expose it to the
+public internet.
+
+### Tail logs / query the DB
 
 ```bash
 tail -f logs/*.log | jq
-```
 
-Or query the audit log directly:
-
-```sql
-select ts, event_type, payload
-from audit_events
-order by ts desc
-limit 50;
+psql postgresql://trident:trident@localhost:5432/trident -c \
+  "select ts, event_type, payload from audit_events order by ts desc limit 50;"
 ```
 
 ## Running tests
@@ -105,16 +123,18 @@ src/trident/
   strategies/          # Strategy protocol + ORB implementation
   risk/                # the pre-trade gate, sizing, and limits
   audit/               # append-only event log + structured logging
-  persistence/         # SQLAlchemy models + Alembic migrations
+  persistence/         # SQLAlchemy models + migrations + kill switch state
+  dashboard/           # FastAPI + HTMX dashboard (localhost only)
 tests/unit/            # pure-function tests for the safety-critical code
-scripts/               # smoke_test, shadow_run, backfill_daily
+scripts/               # smoke_test, shadow_run, run_dashboard, backfill_daily
 ```
 
 ## Roadmap
 
-- **v0.1 (this commit):** scaffolding, market clock, data feed, strategy, risk gate.
+- **v0.1 (this commit):** scaffolding, market clock, data feed, strategy, risk
+  gate, dashboard with kill switch.
 - **v0.2:** Alpaca execution adapter, bracket orders with idempotency keys,
-  reconciliation loop, dead-man's switch, EOD flatten, FastAPI dashboard.
+  reconciliation loop, dead-man's switch, EOD flatten.
 - **v0.3:** Backtest harness with honest slippage + walk-forward.
 - **v0.4:** LLM-narrated trade journal (Claude or GPT, one model, cached).
 - **Some day:** Real money. After at least 8 consecutive weeks of paper

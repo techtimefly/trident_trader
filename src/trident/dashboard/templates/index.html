@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trident Trader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+        :root {
+            --bg: #0a0a0b;
+            --panel: #111114;
+            --panel-2: #18181c;
+            --border: #26262d;
+            --text: #e6e6ea;
+            --text-dim: #8b8b95;
+            --green: #34d399;
+            --green-dim: #14532d;
+            --red: #f87171;
+            --red-dim: #5b1a1a;
+            --amber: #fbbf24;
+            --indigo: #818cf8;
+        }
+        html, body { background: var(--bg); color: var(--text); }
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .mono { font-family: 'Geist Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+        .panel-2 { background: var(--panel-2); }
+        .dim { color: var(--text-dim); }
+        .pos { color: var(--green); }
+        .neg { color: var(--red); }
+        .pill {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.2rem 0.6rem; border-radius: 999px;
+            font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .pill-green { background: rgba(52,211,153,0.12); color: #6ee7b7; }
+        .pill-red   { background: rgba(248,113,113,0.12); color: #fca5a5; }
+        .pill-amber { background: rgba(251,191,36,0.12); color: #fcd34d; }
+        .pill-dim   { background: rgba(139,139,149,0.10); color: var(--text-dim); }
+        .dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; display: inline-block; }
+        .dot-green { background: var(--green); box-shadow: 0 0 0 4px rgba(52,211,153,0.15); }
+        .dot-red   { background: var(--red);   box-shadow: 0 0 0 4px rgba(248,113,113,0.15); }
+        .dot-amber { background: var(--amber); box-shadow: 0 0 0 4px rgba(251,191,36,0.15); }
+        .dot-dim   { background: var(--text-dim); }
+        button.btn {
+            padding: 0.55rem 1rem; border-radius: 8px; font-weight: 600;
+            transition: transform 0.05s ease, background 0.15s ease;
+        }
+        button.btn:active { transform: translateY(1px); }
+        .btn-danger { background: #b91c1c; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+        .btn-ghost:hover { background: var(--panel-2); }
+        table.tt { width: 100%; border-collapse: separate; border-spacing: 0; }
+        table.tt th, table.tt td { padding: 0.55rem 0.75rem; text-align: left; }
+        table.tt thead th { color: var(--text-dim); font-weight: 500; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+        table.tt tbody tr { border-bottom: 1px solid rgba(38,38,45,0.5); }
+        table.tt tbody tr:last-child { border-bottom: none; }
+        table.tt tbody tr:hover { background: var(--panel-2); }
+        .skeleton { background: linear-gradient(90deg, var(--panel-2) 0%, #1f1f25 50%, var(--panel-2) 100%); background-size: 200% 100%; animation: shimmer 1.6s infinite; }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        .empty { color: var(--text-dim); font-size: 0.9rem; padding: 1.5rem; text-align: center; }
+    </style>
+</head>
+<body class="min-h-screen">
+    <header class="px-6 py-4 border-b border-[var(--border)] flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <div class="w-7 h-7 rounded-md bg-gradient-to-br from-indigo-500 to-cyan-400"></div>
+            <h1 class="text-lg font-semibold tracking-tight">Trident Trader</h1>
+            <span class="pill pill-dim">paper • v0.1</span>
+        </div>
+        <div class="text-sm dim mono" id="clock"></div>
+    </header>
+
+    <main class="px-6 py-6 max-w-7xl mx-auto space-y-6">
+        <section
+            id="hero"
+            class="panel p-6"
+            hx-get="/api/hero"
+            hx-trigger="load, every 3s"
+            hx-swap="innerHTML">
+            <div class="skeleton h-24 rounded-md"></div>
+        </section>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <section class="panel">
+                <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-sm font-semibold tracking-tight">Open positions</h2>
+                        <span class="pill pill-dim">live from alpaca</span>
+                    </div>
+                </div>
+                <div
+                    id="positions"
+                    hx-get="/api/positions"
+                    hx-trigger="load, every 5s"
+                    hx-swap="innerHTML">
+                    <div class="skeleton h-16 m-4 rounded-md"></div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-sm font-semibold tracking-tight">Today's signals</h2>
+                        <span class="pill pill-dim">shadow mode</span>
+                    </div>
+                </div>
+                <div
+                    id="signals"
+                    hx-get="/api/signals"
+                    hx-trigger="load, every 5s"
+                    hx-swap="innerHTML">
+                    <div class="skeleton h-16 m-4 rounded-md"></div>
+                </div>
+            </section>
+        </div>
+
+        <section class="panel">
+            <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+                <h2 class="text-sm font-semibold tracking-tight">Recent audit events</h2>
+                <span class="pill pill-dim">last 24h</span>
+            </div>
+            <div
+                id="audit"
+                hx-get="/api/audit"
+                hx-trigger="load, every 5s"
+                hx-swap="innerHTML">
+                <div class="skeleton h-16 m-4 rounded-md"></div>
+            </div>
+        </section>
+
+        <footer class="text-xs dim text-center py-8">
+            Not investment advice. Paper trading only. Equity / positions are read from your Alpaca paper account.
+        </footer>
+    </main>
+
+    <script>
+        function tickClock() {
+            const el = document.getElementById('clock');
+            if (!el) return;
+            const now = new Date();
+            el.textContent = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false }) + ' ET';
+        }
+        tickClock();
+        setInterval(tickClock, 1000);
+    </script>
+</body>
+</html>

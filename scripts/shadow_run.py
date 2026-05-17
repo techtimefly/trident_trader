@@ -20,6 +20,7 @@ from decimal import Decimal
 from trident.audit.log import configure_logging, get_logger, record
 from trident.clock import is_market_open, now_et
 from trident.data.bars import Bar, BarStore
+from trident.data.bars_backfill import recover_strategy_state
 from trident.data.feed import AlpacaBarFeed
 from trident.data.persistence import persist_bar
 from trident.persistence.daily_plan import resolve_today
@@ -45,6 +46,14 @@ async def main(strategy_name: str = "orb_5m") -> None:
 
     store = BarStore()
     strategy = build_strategy(strategy_name, WATCHLIST)
+    # Crash recovery: replay today's persisted bars to warm the store and
+    # rebuild strategy state, so a mid-session restart resumes correctly.
+    try:
+        recovered = recover_strategy_state(strategy, store, WATCHLIST, now_et().date())
+        if recovered:
+            log.info("session_state_recovered", bars=recovered)
+    except Exception:
+        log.exception("session_state_recovery_failed")
     limits = RiskLimits(
         risk_per_trade_pct=settings.risk_per_trade_pct,
         daily_loss_limit_pct=settings.daily_loss_limit_pct,

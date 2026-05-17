@@ -33,7 +33,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 - [x] 4.3 Wire `LiveTrade` creation into `portfolio/tracking.py` position-close (inner-ring — tests same commit).
 - [x] 4.4 Add the per-trade P&L dashboard panel (`_pnl.html`).
 - [x] 4.5 Add `src/trident/data/bars_backfill.py` — BarStore DB-backfill helper + tests.
-- [ ] 4.6 Add startup BarStore backfill + strategy-state rebuild to the runners.
+- [x] 4.6 Add startup BarStore backfill + strategy-state rebuild to the runners.
 - [ ] 4.7 Handle approved-but-unsubmitted signals on startup (mark stale + log).
 
 ## Phase 5 — Live trading sketch (docs only)

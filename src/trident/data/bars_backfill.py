@@ -18,6 +18,7 @@ from trident.clock import ET
 from trident.data.bars import Bar, BarStore
 from trident.persistence.models import Bar as BarRow
 from trident.persistence.session import session_scope
+from trident.strategies.base import Strategy
 
 
 def load_day_bars(
@@ -72,3 +73,27 @@ def backfill_store(
     """Load ``day``'s persisted bars for ``symbols`` into ``store``. Returns the
     number of bars loaded."""
     return fill_store(store, load_day_bars(symbols, day, timeframe))
+
+
+def replay_bars_through(strategy: Strategy, store: BarStore, bars: list[Bar]) -> int:
+    """Append ``bars`` to ``store`` and feed each through ``strategy.on_bar`` to
+    rebuild the strategy's in-memory state (opening range, VWAP accumulators,
+    the entered flags). Any signal returned during replay is discarded — only
+    state is rebuilt, no orders are placed. Returns the count replayed."""
+    for bar in bars:
+        store.append(bar)
+        strategy.on_bar(bar, store)
+    return len(bars)
+
+
+def recover_strategy_state(
+    strategy: Strategy,
+    store: BarStore,
+    symbols: list[str],
+    day: date,
+    timeframe: str = "1min",
+) -> int:
+    """Mid-session crash recovery: reload ``day``'s persisted bars and replay
+    them through ``strategy``, so a restart resumes with the store warm and the
+    strategy's state reconstructed. Returns the number of bars replayed."""
+    return replay_bars_through(strategy, store, load_day_bars(symbols, day, timeframe))

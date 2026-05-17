@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -20,14 +21,22 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from trident.audit.log import configure_logging
-from trident.clock import ET, is_market_open, now_et
+from trident.clock import ET, is_market_open, now_et, nth_business_day_back
 from trident.dashboard.alpaca_view import get_account, list_positions
+from trident.persistence.daily_plan import (
+    day_trades_in_window,
+    get_for_day,
+    notional_deployed_today,
+    upsert,
+)
 from trident.persistence.models import (
     AuditEvent,
-    Order as OrderModel,
     ReplayRun,
     ReplayTrade,
     Signal,
+)
+from trident.persistence.models import (
+    Order as OrderModel,
 )
 from trident.persistence.session import session_scope
 from trident.persistence.state import (
@@ -53,6 +62,12 @@ def _fmt_pct(d: Decimal | None) -> str:
     if d is None:
         return "—"
     return f"{d:+.2f}%"
+
+
+def _plain_decimal(d: Decimal) -> str:
+    """Decimal as a plain string — trailing zeros trimmed, no scientific notation."""
+    s = format(d, "f")
+    return s.rstrip("0").rstrip(".") if "." in s else s
 
 
 def _bot_status() -> dict[str, Any]:
@@ -212,6 +227,96 @@ def api_kill_engage() -> Any:
 def api_kill_release() -> Any:
     set_kill_switch(False, actor="dashboard")
     return {"engaged": False}
+
+
+def _daily_plan_context(notice: str | None = None, error: bool = False) -> dict[str, Any]:
+    """Render context for the Daily Plan panel: today's plan + live usage.
+
+    Defensive — the panel is outer-ring; a DB or Alpaca hiccup degrades it to
+    placeholders rather than 500-ing.
+    """
+    today = now_et().date()
+    ctx: dict[str, Any] = {
+        "trading_day": today.strftime("%a %b %d"),
+        "window_start": nth_business_day_back(today, 5).strftime("%b %d"),
+        "notice": notice,
+        "notice_error": error,
+        "budget_pct_value": "",
+        "max_day_trades_value": "",
+        "has_budget": False,
+        "budget_fmt": "—",
+        "deployed_fmt": "—",
+        "budget_used_pct": 0,
+        "has_trade_cap": False,
+        "day_trades_used": 0,
+        "day_trades_cap": 0,
+    }
+    try:
+        plan = get_for_day(today)
+        if plan is not None and plan.budget_pct is not None:
+            ctx["has_budget"] = True
+            ctx["budget_pct_value"] = _plain_decimal(plan.budget_pct)
+            deployed = notional_deployed_today(today)
+            ctx["deployed_fmt"] = _fmt_money(deployed)
+            account = get_account()
+            if account is not None:
+                budget = account.equity * (plan.budget_pct / Decimal("100"))
+                ctx["budget_fmt"] = _fmt_money(budget)
+                if budget > 0:
+                    ctx["budget_used_pct"] = min(int(deployed / budget * 100), 100)
+        if plan is not None and plan.max_day_trades is not None:
+            ctx["has_trade_cap"] = True
+            ctx["max_day_trades_value"] = str(plan.max_day_trades)
+            ctx["day_trades_cap"] = plan.max_day_trades
+            ctx["day_trades_used"] = day_trades_in_window(today)
+    except Exception:
+        if not notice:
+            ctx["notice"] = "Could not load today's plan."
+            ctx["notice_error"] = True
+    return ctx
+
+
+def _save_daily_plan(budget_pct_raw: str, max_day_trades_raw: str) -> tuple[str, bool]:
+    """Parse, validate and persist today's plan. Returns (notice, is_error).
+
+    A blank field means 'no cap' for that knob.
+    """
+    budget_pct: Decimal | None = None
+    max_day_trades: int | None = None
+    try:
+        if budget_pct_raw.strip():
+            budget_pct = Decimal(budget_pct_raw.strip())
+            if not (Decimal("0") < budget_pct <= Decimal("100")):
+                return "Capital budget must be between 0 and 100%.", True
+        if max_day_trades_raw.strip():
+            max_day_trades = int(max_day_trades_raw.strip())
+            if max_day_trades < 0:
+                return "Max day-trades cannot be negative.", True
+    except (ValueError, ArithmeticError):
+        return "Could not parse those values — check the numbers.", True
+    try:
+        upsert(now_et().date(), budget_pct, max_day_trades, actor="dashboard")
+    except Exception:
+        return "Failed to save the plan.", True
+    return "Today's plan saved.", False
+
+
+@app.get("/api/daily-plan", response_class=HTMLResponse)
+def api_daily_plan(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_daily_plan.html", _daily_plan_context())
+
+
+@app.post("/api/daily-plan", response_class=HTMLResponse)
+async def api_daily_plan_save(request: Request) -> Any:
+    # HTMX posts an application/x-www-form-urlencoded body; parse_qs is stdlib,
+    # so no python-multipart dependency is needed for this one form.
+    form = parse_qs((await request.body()).decode("utf-8"))
+    budget_pct = (form.get("budget_pct") or [""])[0]
+    max_day_trades = (form.get("max_day_trades") or [""])[0]
+    notice, error = _save_daily_plan(budget_pct, max_day_trades)
+    return templates.TemplateResponse(
+        request, "_daily_plan.html", _daily_plan_context(notice=notice, error=error)
+    )
 
 
 @app.get("/api/replay", response_class=HTMLResponse)

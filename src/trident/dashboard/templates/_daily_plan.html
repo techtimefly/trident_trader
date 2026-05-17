@@ -1,0 +1,54 @@
+<div class="p-5 space-y-5">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Capital budget</div>
+            {% if has_budget %}
+                <div class="mono text-lg font-semibold mt-1">
+                    {{ deployed_fmt }} <span class="dim text-sm">of</span> {{ budget_fmt }}
+                </div>
+                <div class="mt-2 h-1.5 rounded-full bg-[var(--panel-2)] overflow-hidden">
+                    <div class="h-full rounded-full"
+                         style="width: {{ budget_used_pct }}%; background: var(--indigo);"></div>
+                </div>
+                <div class="text-xs dim mt-1 mono">{{ budget_used_pct }}% of today's budget deployed</div>
+            {% else %}
+                <div class="text-sm dim mt-1">No cap set &mdash; capital is unconstrained.</div>
+            {% endif %}
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Day-trades</div>
+            {% if has_trade_cap %}
+                <div class="mono text-lg font-semibold mt-1">
+                    {{ day_trades_used }} <span class="dim text-sm">of</span> {{ day_trades_cap }}
+                </div>
+                <div class="text-xs dim mt-1 mono">rolling 5 trading days &middot; since {{ window_start }}</div>
+            {% else %}
+                <div class="text-sm dim mt-1">No cap set &mdash; day-trade count is unconstrained.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <form hx-post="/api/daily-plan" hx-target="#daily-plan" hx-swap="innerHTML"
+          class="border-t border-[var(--border)] pt-4 flex flex-wrap items-end gap-4">
+        <div>
+            <label class="text-xs dim uppercase tracking-widest block mb-1">Budget (% equity)</label>
+            <input type="number" name="budget_pct" step="0.1" min="0" max="100"
+                   value="{{ budget_pct_value }}" placeholder="no cap"
+                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-32" />
+        </div>
+        <div>
+            <label class="text-xs dim uppercase tracking-widest block mb-1">Max day-trades</label>
+            <input type="number" name="max_day_trades" step="1" min="0"
+                   value="{{ max_day_trades_value }}" placeholder="no cap"
+                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-32" />
+        </div>
+        <button class="btn btn-ghost text-sm" type="submit">Save today's plan</button>
+        {% if notice %}
+            <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
+        {% endif %}
+    </form>
+    <div class="text-xs dim">
+        Leave a field blank for &ldquo;no cap&rdquo;. Applies to {{ trading_day }};
+        the runner picks it up live &mdash; no restart.
+    </div>
+</div>

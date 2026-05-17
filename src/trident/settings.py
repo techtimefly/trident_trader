@@ -8,10 +8,18 @@ from typing import Any
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# settings.py lives at src/trident/settings.py, so the project root — where
+# .env and .env.example sit — is two directories up. Anchoring the .env lookup
+# here means config loads correctly no matter which directory a script runs from.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 class Settings(BaseSettings):
+    # Precedence, highest first: real environment variables, then the .env file,
+    # then the field defaults below. Exported env vars therefore override .env,
+    # and .env is optional — when it is absent, env vars + defaults are used.
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )

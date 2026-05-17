@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from trident.backtest.costs import CostModel
 from trident.backtest.simulator import simulate_trade
 from trident.data.bars import Bar
 from trident.strategies.base import Signal
@@ -142,3 +143,82 @@ def test_short_eod_close() -> None:
     assert trade.exit_reason == "eod"
     assert trade.exit_price == Decimal("99.4")
     assert trade.pnl == Decimal("6.0")  # (100 - 99.4) * 10
+
+
+# --- cost model: slippage + fees -------------------------------------------------
+
+
+def test_zero_cost_matches_idealistic() -> None:
+    # The default costs arg is ZERO_COST; passing CostModel() explicitly is identical.
+    bars = [bar(1, "102.1", "101.5", "102.0")]
+    sig = make_signal()
+    default = simulate_trade(sig, qty=10, subsequent_bars=bars)
+    explicit = simulate_trade(sig, qty=10, subsequent_bars=bars, costs=CostModel())
+    assert default is not None
+    assert explicit is not None
+    assert default.pnl == explicit.pnl == Decimal("20")
+    assert default.entry_price == explicit.entry_price == Decimal("100")
+    assert default.gross_pnl == default.pnl  # no fees → gross == net
+
+
+def test_long_entry_slips_up() -> None:
+    # 100 bps: a long entry fills above the intended 100.
+    costs = CostModel(slippage_bps=Decimal("100"))
+    bars = [bar(1, "102.1", "101.5", "102.0")]
+    trade = simulate_trade(make_signal(), qty=10, subsequent_bars=bars, costs=costs)
+    assert trade is not None
+    assert trade.ideal_entry_price == Decimal("100")
+    assert trade.entry_price == Decimal("101.00")
+
+
+def test_target_exit_does_not_slip() -> None:
+    # A target is a resting limit order — it fills at exactly the target.
+    costs = CostModel(slippage_bps=Decimal("100"))
+    bars = [bar(1, "102.1", "101.5", "102.0")]
+    trade = simulate_trade(make_signal(), qty=10, subsequent_bars=bars, costs=costs)
+    assert trade is not None
+    assert trade.exit_reason == "target"
+    assert trade.exit_price == Decimal("102")
+
+
+def test_stop_exit_slips_past_stop() -> None:
+    # A stop is a market order — the long exit fills below the 99 stop.
+    costs = CostModel(slippage_bps=Decimal("100"))
+    bars = [bar(1, "100.5", "98.5", "99.5")]
+    trade = simulate_trade(make_signal(), qty=10, subsequent_bars=bars, costs=costs)
+    assert trade is not None
+    assert trade.exit_reason == "stop"
+    assert trade.exit_price == Decimal("98.01")  # 99 - 1%
+
+
+def test_eod_exit_slips() -> None:
+    # EOD flatten is a market order — the long exit slips below the last close.
+    costs = CostModel(slippage_bps=Decimal("100"))
+    bars = [bar(1, "100.5", "99.8", "100.2"), bar(2, "100.8", "100.1", "100.5")]
+    trade = simulate_trade(make_signal(), qty=10, subsequent_bars=bars, costs=costs)
+    assert trade is not None
+    assert trade.exit_reason == "eod"
+    assert trade.exit_price == Decimal("99.50")  # 100.5 - 1%, rounded
+
+
+def test_fees_reduce_net_pnl() -> None:
+    # Flat per-share commission on both legs, no slippage.
+    costs = CostModel(fee_per_share=Decimal("0.01"))
+    bars = [bar(1, "102.1", "101.5", "102.0")]
+    trade = simulate_trade(make_signal(), qty=10, subsequent_bars=bars, costs=costs)
+    assert trade is not None
+    assert trade.gross_pnl == Decimal("20")  # unchanged: no slippage
+    assert trade.entry_fee == Decimal("0.10")  # 0.01 * 10
+    assert trade.exit_fee == Decimal("0.10")
+    assert trade.pnl == trade.gross_pnl - trade.entry_fee - trade.exit_fee
+    assert trade.pnl == Decimal("19.80")
+
+
+def test_r_multiple_excludes_fees() -> None:
+    # R is gross P&L over planned risk — fees do not move it.
+    costs = CostModel(fee_per_share=Decimal("0.05"))
+    bars = [bar(1, "102.1", "101.5", "102.0")]
+    trade = simulate_trade(make_signal(), qty=10, subsequent_bars=bars, costs=costs)
+    assert trade is not None
+    assert trade.r_multiple == Decimal("2")  # gross 20 over qty*risk 10
+    assert trade.pnl < trade.gross_pnl  # fees ate into net

@@ -20,14 +20,15 @@ from decimal import Decimal
 from typing import Any
 
 from trident.audit.log import configure_logging, get_logger
+from trident.backtest.costs import ZERO_COST
+from trident.backtest.engine import run_day
 from trident.backtest.persistence import save_replay
-from trident.backtest.simulator import SimulatedTrade, simulate_trade
+from trident.backtest.simulator import SimulatedTrade
+from trident.backtest.stats import summarize
 from trident.clock import ET, is_trading_day
-from trident.data.bars import Bar, BarStore
-from trident.risk.gate import AccountState, MarketState, evaluate
+from trident.data.bars import Bar
 from trident.risk.limits import RiskLimits
 from trident.settings import get_settings
-from trident.strategies.orb import OpeningRangeBreakout
 
 WATCHLIST = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD"]
 
@@ -80,65 +81,16 @@ def trading_days_back(end: date, n: int) -> list[date]:
 
 
 def replay_one_day(d: date, equity: Decimal, limits: RiskLimits, log: Any) -> list[SimulatedTrade]:
-    """Run the strategy + gate over one historical trading day and simulate fills."""
+    """Fetch one historical day's 1-min bars and replay them idealistically.
+
+    Idealistic = no slippage, no fees (``ZERO_COST``). For an honest, costed
+    backtest use ``scripts/backtest.py``. The strategy + gate + fill loop itself
+    lives in ``trident.backtest.engine.run_day``.
+    """
     start = datetime.combine(d, time(8, 0), tzinfo=ET).astimezone(UTC)
     end = datetime.combine(d, time(20, 0), tzinfo=ET).astimezone(UTC)
     bars = fetch_minute_bars(start, end, WATCHLIST)
-    if not bars:
-        log.warning("no_bars_for_day", date=d.isoformat())
-        return []
-
-    strategy = OpeningRangeBreakout(symbols=WATCHLIST)
-    store = BarStore()
-    trades: list[SimulatedTrade] = []
-
-    for bar in bars:
-        store.append(bar)
-        sig = strategy.on_bar(bar, store)
-        if sig is None:
-            continue
-
-        bar_et = bar.ts.astimezone(ET)
-        # Replay treats every signal as if no positions are currently open. The
-        # strategy itself enforces one entry per symbol per day, so we won't
-        # double-up; we simply ignore the gate's max_concurrent_positions check
-        # since we are not tracking real-time fills as the day progresses.
-        account = AccountState(
-            equity=equity,
-            starting_equity_today=equity,
-            buying_power=equity * Decimal("2"),
-            open_positions={},
-        )
-        market = MarketState()
-        decision = evaluate(
-            sig, account, market, limits, time(bar_et.hour, bar_et.minute)
-        )
-        if not decision.approved:
-            log.info(
-                "signal_rejected",
-                date=d.isoformat(),
-                symbol=sig.symbol,
-                reason=decision.reason,
-            )
-            continue
-
-        # Replay sizing uses the gate's chosen share count.
-        followups = [b for b in bars if b.symbol == sig.symbol and b.ts > sig.ts]
-        trade = simulate_trade(sig, decision.shares, followups)
-        if trade is not None:
-            trades.append(trade)
-            log.info(
-                "simulated_trade",
-                date=d.isoformat(),
-                symbol=sig.symbol,
-                qty=trade.qty,
-                entry=str(trade.entry_price),
-                exit_reason=trade.exit_reason,
-                exit_price=str(trade.exit_price),
-                pnl=str(trade.pnl),
-                r=f"{trade.r_multiple:.2f}",
-            )
-    return trades
+    return run_day(d, bars, equity, limits, WATCHLIST, ZERO_COST, log)
 
 
 def fmt_money(d: Decimal) -> str:
@@ -152,12 +104,7 @@ def print_report(trades: list[SimulatedTrade]) -> None:
         print("did not include a valid opening range, or no breakouts met the volume filter.\n")
         return
 
-    by_exit: dict[str, int] = defaultdict(int)
     by_symbol_pnl: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-    total_pnl = Decimal("0")
-    wins = 0
-    losses = 0
-    r_sum = Decimal("0")
 
     print("\n" + "=" * 88)
     print(f"{'Time (ET)':<22}{'Sym':<6}{'Side':<6}{'Qty':>5}{'Entry':>10}{'Exit':>10}{'Why':>8}{'P&L':>14}{'R':>6}")
@@ -169,29 +116,20 @@ def print_report(trades: list[SimulatedTrade]) -> None:
             f"{t.signal.symbol:<6}"
             f"{t.signal.side:<6}"
             f"{t.qty:>5}"
-            f"{str(t.entry_price):>10}"
-            f"{str(t.exit_price):>10}"
+            f"{t.entry_price!s:>10}"
+            f"{t.exit_price!s:>10}"
             f"{t.exit_reason:>8}"
             f"{fmt_money(t.pnl):>14}"
             f"{t.r_multiple:>6.2f}"
         )
-        by_exit[t.exit_reason] += 1
         by_symbol_pnl[t.signal.symbol] += t.pnl
-        total_pnl += t.pnl
-        r_sum += t.r_multiple
-        if t.pnl > 0:
-            wins += 1
-        elif t.pnl < 0:
-            losses += 1
     print("-" * 88)
 
-    n = len(trades)
-    win_rate = (Decimal(wins) / Decimal(n) * Decimal("100")) if n else Decimal("0")
-    avg_r = (r_sum / Decimal(n)) if n else Decimal("0")
-    print(f"Trades: {n}   wins {wins}   losses {losses}   win rate {win_rate:.1f}%")
-    print(f"Exits: " + "  ".join(f"{k}={v}" for k, v in sorted(by_exit.items())))
-    print(f"By symbol: " + "  ".join(f"{s}={fmt_money(p)}" for s, p in sorted(by_symbol_pnl.items())))
-    print(f"Total P&L (no fees, no slippage): {fmt_money(total_pnl)}   avg R {avg_r:+.2f}")
+    s = summarize(trades)
+    print(f"Trades: {s.num_trades}   wins {s.wins}   losses {s.losses}   win rate {s.win_rate:.1f}%")
+    print("Exits: " + "  ".join(f"{k}={v}" for k, v in sorted(s.by_exit.items())))
+    print("By symbol: " + "  ".join(f"{sym}={fmt_money(p)}" for sym, p in sorted(by_symbol_pnl.items())))
+    print(f"Total P&L (no fees, no slippage): {fmt_money(s.total_pnl)}   avg R {s.avg_r:+.2f}")
     print("=" * 88)
     print()
 

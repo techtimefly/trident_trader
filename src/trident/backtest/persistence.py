@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from trident.backtest.simulator import SimulatedTrade
+from trident.backtest.stats import summarize
 from trident.persistence.models import ReplayRun, ReplayTrade
 from trident.persistence.session import session_scope
 
@@ -22,15 +23,7 @@ def save_replay(
     if not days:
         raise ValueError("save_replay requires at least one day")
 
-    wins = sum(1 for t in trades if t.pnl > 0)
-    losses = sum(1 for t in trades if t.pnl < 0)
-    total_pnl = sum((t.pnl for t in trades), Decimal("0"))
-    avg_r = (
-        sum((t.r_multiple for t in trades), Decimal("0")) / Decimal(len(trades))
-        if trades
-        else Decimal("0")
-    )
-
+    summary = summarize(trades)
     run_id = uuid.uuid4()
     with session_scope() as s:
         s.add(
@@ -43,11 +36,11 @@ def save_replay(
                 equity=equity,
                 watchlist={"symbols": watchlist},
                 strategy=strategy,
-                num_trades=len(trades),
-                wins=wins,
-                losses=losses,
-                total_pnl=total_pnl,
-                avg_r=avg_r,
+                num_trades=summary.num_trades,
+                wins=summary.wins,
+                losses=summary.losses,
+                total_pnl=summary.total_pnl,
+                avg_r=summary.avg_r,
             )
         )
         for t in trades:

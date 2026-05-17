@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     max_concurrent_positions: int = 3
     account_equity_override: Decimal | None = None
 
+    # Honest-backtest cost model (scripts/backtest.py). Synthetic slippage in
+    # basis points (IEX gives no bid/ask); fees default to realistic small values.
+    backtest_slippage_bps: Decimal = Field(default=Decimal("2.0"))
+    backtest_fee_per_share: Decimal = Field(default=Decimal("0"))
+    backtest_min_fee: Decimal = Field(default=Decimal("0"))
+    backtest_sec_fee_rate: Decimal = Field(default=Decimal("0.0000278"))
+    backtest_taf_per_share: Decimal = Field(default=Decimal("0.000166"))
+
     log_level: str = "INFO"
     log_dir: Path = Path("./logs")
     environment: str = "development"
@@ -52,10 +60,20 @@ class Settings(BaseSettings):
                 return None
         return v
 
-    @field_validator("alpaca_data_feed", "log_level", "environment", mode="before")
+    @field_validator(
+        "alpaca_data_feed",
+        "log_level",
+        "environment",
+        "backtest_slippage_bps",
+        "backtest_fee_per_share",
+        "backtest_min_fee",
+        "backtest_sec_fee_rate",
+        "backtest_taf_per_share",
+        mode="before",
+    )
     @classmethod
     def _strip_trailing_comment(cls, v: Any) -> Any:
-        """Strip a trailing `# ...` comment so .env inline comments don't poison strings."""
+        """Strip a trailing `# ...` comment so .env inline comments don't poison values."""
         if isinstance(v, str) and "#" in v:
             head, _, _ = v.partition("#")
             return head.strip()

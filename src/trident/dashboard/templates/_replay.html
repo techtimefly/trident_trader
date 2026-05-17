@@ -22,10 +22,21 @@
         <div>
             <div class="text-xs dim uppercase tracking-widest">Total P&amp;L</div>
             <div class="mono text-xl mt-1 {{ 'pos' if run.total_pnl_positive else 'neg' }}">{{ run.total_pnl }}</div>
-            <div class="text-xs dim mt-1">no fees, no slippage</div>
+            {% if run.is_honest %}
+                <div class="text-xs dim mt-1">net &middot; gross {{ run.gross_pnl }} &middot; fees {{ run.total_fees }}</div>
+            {% else %}
+                <div class="text-xs dim mt-1">no fees, no slippage</div>
+            {% endif %}
         </div>
     </div>
-    <div class="text-xs dim mt-3">Last replayed {{ run.started_at }}</div>
+    <div class="text-xs dim mt-3">
+        {% if run.is_honest %}
+            <span class="pill pill-amber">honest backtest</span>
+            slippage {{ run.slippage_bps }} bps &middot; run {{ run.started_at }}
+        {% else %}
+            <span class="pill pill-dim">idealistic replay</span> &middot; run {{ run.started_at }}
+        {% endif %}
+    </div>
 </div>
 
 {% if rows %}

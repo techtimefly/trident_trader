@@ -360,8 +360,10 @@ def api_replay(request: Request) -> Any:
             float(latest.wins) / float(latest.num_trades) * 100.0 if latest.num_trades else 0.0
         )
         run_view = {
-            "first_day": latest.first_day.astimezone(ET).strftime("%Y-%m-%d"),
-            "last_day": latest.last_day.astimezone(ET).strftime("%Y-%m-%d"),
+            # first_day/last_day are calendar dates stored as midnight UTC —
+            # format directly, do NOT tz-convert (that would shift a day back).
+            "first_day": latest.first_day.strftime("%Y-%m-%d"),
+            "last_day": latest.last_day.strftime("%Y-%m-%d"),
             "days": latest.days,
             "num_trades": latest.num_trades,
             "wins": latest.wins,
@@ -372,6 +374,13 @@ def api_replay(request: Request) -> Any:
             "avg_r": f"{latest.avg_r:+.2f}",
             "started_at": latest.started_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
             "strategy": latest.strategy,
+            "mode": latest.mode,
+            "is_honest": latest.mode == "honest",
+            "gross_pnl": _fmt_money(latest.gross_pnl),
+            "total_fees": _fmt_money(latest.total_fees),
+            "slippage_bps": (
+                _plain_decimal(latest.slippage_bps) if latest.slippage_bps is not None else "—"
+            ),
         }
     return templates.TemplateResponse(
         request, "_replay.html", {"run": run_view, "rows": rows}

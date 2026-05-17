@@ -22,14 +22,22 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from trident.accounting.round_trip import (
+    ExitCandidate,
+    compute_round_trip,
+    is_wash_sale,
+    pick_exit_order,
+)
 from trident.audit.log import get_logger, record
 from trident.execution.broker import Broker, OrderSnapshot
+from trident.persistence.live_trade_store import record_live_trade, wash_check_entries
 from trident.persistence.models import ManagedPosition as ManagedPositionRow
 from trident.persistence.models import Order as OrderRow
 from trident.persistence.models import Position as PositionRow
@@ -148,6 +156,7 @@ def reconcile_positions(broker: Broker) -> dict[str, object]:
     broker_pos = {p.symbol: p for p in broker.list_positions()}
 
     drift: list[dict[str, object]] = []
+    closes: list[_CloseFacts] = []
     with session_scope() as s:
         managed = {m.symbol: m for m in s.scalars(select(ManagedPositionRow))}
         local = {p.symbol: p for p in s.scalars(select(PositionRow))}
@@ -156,6 +165,19 @@ def reconcile_positions(broker: Broker) -> dict[str, object]:
         for symbol, local_pos in list(local.items()):
             if symbol not in broker_pos:
                 drift.append({"symbol": symbol, "kind": "local_only", "local_qty": local_pos.qty})
+                # Capture the close facts before deleting — recorded as a
+                # LiveTrade after this session closes.
+                mp = managed.get(symbol)
+                closes.append(
+                    _CloseFacts(
+                        symbol=symbol,
+                        qty=local_pos.qty,
+                        avg_entry=local_pos.avg_entry,
+                        stop_price=local_pos.stop_price,
+                        opened_at=local_pos.opened_at,
+                        strategy=mp.strategy if mp is not None else "unknown",
+                    )
+                )
                 s.delete(local_pos)
                 record(
                     "position_closed",
@@ -210,6 +232,11 @@ def reconcile_positions(broker: Broker) -> dict[str, object]:
                 payload={"symbol": symbol},
             )
 
+    # Record each closed position as a LiveTrade — done after the session above
+    # so each LiveTrade write is its own transaction.
+    for cf in closes:
+        _record_live_trade_for_close(cf)
+
     result: dict[str, object] = {
         "ts": datetime.now(UTC).isoformat(),
         "broker_positions": len(broker_pos),
@@ -218,6 +245,68 @@ def reconcile_positions(broker: Broker) -> dict[str, object]:
     }
     record("reconciliation_completed", actor="reconciler", payload=result)
     return result
+
+
+@dataclass(frozen=True)
+class _CloseFacts:
+    """The facts of a position close, captured for LiveTrade recording."""
+
+    symbol: str
+    qty: int  # signed: negative = short
+    avg_entry: Decimal
+    stop_price: Decimal
+    opened_at: datetime
+    strategy: str
+
+
+def _record_live_trade_for_close(cf: _CloseFacts) -> None:
+    """Match a closed position to its exit order and record a LiveTrade.
+
+    The exit order is the most recent filled order of the opposite broker side
+    since the position opened. When none is found the close is audited but no
+    LiveTrade is written — P&L is never fabricated. Live per-order fees are not
+    tracked (the orders table has no fee column), so ``fees`` is zero here.
+    """
+    side = "long" if cf.qty >= 0 else "short"
+    qty = abs(cf.qty)
+    if qty == 0:
+        return
+
+    with session_scope() as s:
+        rows = s.scalars(
+            select(OrderRow).where(
+                OrderRow.symbol == cf.symbol,
+                OrderRow.state == "filled",
+            )
+        ).all()
+        candidates = [
+            ExitCandidate(side=r.side, filled_at=r.filled_at, avg_fill_price=r.avg_fill_price)
+            for r in rows
+            if r.filled_at is not None and r.avg_fill_price is not None
+        ]
+
+    exit_order = pick_exit_order(candidates, side, cf.opened_at)
+    if exit_order is None:
+        record("live_trade_unmatched", actor="reconciler", payload={"symbol": cf.symbol})
+        return
+
+    stop = cf.stop_price if cf.stop_price > 0 else None
+    rt = compute_round_trip(
+        symbol=cf.symbol,
+        side=side,
+        qty=qty,
+        entry_ts=cf.opened_at,
+        entry_price=cf.avg_entry,
+        exit_ts=exit_order.filled_at,
+        exit_price=exit_order.avg_fill_price,
+        fees=Decimal("0"),
+        stop_price=stop,
+    )
+    others = wash_check_entries(cf.symbol, rt.exit_ts)
+    wash = is_wash_sale(
+        symbol=cf.symbol, exit_ts=rt.exit_ts, net_pnl=rt.net_pnl, other_entries=others
+    )
+    record_live_trade(rt, strategy=cf.strategy, wash_sale=wash)
 
 
 def _get_by_client_id(session: Session, client_order_id: str) -> OrderRow | None:

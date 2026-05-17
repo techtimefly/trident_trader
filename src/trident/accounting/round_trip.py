@@ -88,6 +88,31 @@ def compute_round_trip(
     )
 
 
+@dataclass(frozen=True)
+class ExitCandidate:
+    """A filled order that might be the one that closed a position."""
+
+    side: str  # broker side: buy | sell
+    filled_at: datetime
+    avg_fill_price: Decimal
+
+
+def pick_exit_order(
+    candidates: list[ExitCandidate], entry_side: str, opened_at: datetime
+) -> ExitCandidate | None:
+    """The order that closed a position, or None.
+
+    The closing order has the opposite broker side to the entry (a long is
+    closed by a sell, a short by a buy) and filled at or after the position
+    opened. The most recent such fill is the exit.
+    """
+    want = "sell" if entry_side == "long" else "buy"
+    eligible = [c for c in candidates if c.side == want and c.filled_at >= opened_at]
+    if not eligible:
+        return None
+    return max(eligible, key=lambda c: c.filled_at)
+
+
 def is_wash_sale(
     *,
     symbol: str,

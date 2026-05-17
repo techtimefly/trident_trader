@@ -18,7 +18,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 - [x] 2.6 Widen the gate's default entry-time window in `RiskLimits` to a wide outer bound + update gate tests (inner-ring — tests same commit). ORB keeps its own 11:00 cutoff.
 
 ## Phase 3 — Active position management
-- [ ] 3.1 Extend the `Broker` protocol with `submit_order` / `cancel_order` / `replace_order` / `close_position` + protocol/fake-broker tests.
+- [x] 3.1 Extend the `Broker` protocol with `submit_order` / `cancel_order` / `replace_order` / `close_position` + protocol/fake-broker tests.
 - [ ] 3.2 Implement the new methods in `AlpacaBroker` + tests.
 - [ ] 3.3 Add a single-leg `OrderIntent` + builder in `execution/orders.py` + tests.
 - [ ] 3.4 Add the `ManagedPosition` table / order-leg linkage + migration `0009`.

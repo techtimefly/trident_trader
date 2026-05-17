@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
-from trident.execution.orders import BracketOrderIntent
+from trident.execution.orders import BracketOrderIntent, OrderIntent
 
 
 @dataclass(frozen=True)
@@ -40,8 +40,17 @@ class PositionSnapshot:
     unrealized_pl: Decimal
 
 
+@runtime_checkable
 class Broker(Protocol):
-    """The execution surface used by the runner. Only the v0.2-needed methods."""
+    """The execution surface used by the runner.
+
+    The bracket + bulk-flatten methods are the entry/EOD path. The single-order
+    and single-position methods (``submit_order``, ``cancel_order``,
+    ``replace_order``, ``close_position``) are the active-management path: they
+    are what trailing stops, scale-ins and scale-outs, and manual per-position
+    control are built on — none of which is expressible with only bulk cancel
+    and bulk close.
+    """
 
     def submit_bracket(self, intent: BracketOrderIntent) -> SubmittedOrder: ...
 
@@ -56,3 +65,33 @@ class Broker(Protocol):
     def get_order_by_client_id(self, client_order_id: str) -> OrderSnapshot | None: ...
 
     def list_positions(self) -> list[PositionSnapshot]: ...
+
+    # --- Active position management ---------------------------------------
+
+    def submit_order(self, intent: OrderIntent) -> SubmittedOrder:
+        """Submit a single-leg (non-bracket) order — a scale-in add or an exit."""
+        ...
+
+    def cancel_order(self, broker_order_id: str) -> None:
+        """Cancel one order by its broker id (e.g. a stale protective leg)."""
+        ...
+
+    def replace_order(
+        self,
+        broker_order_id: str,
+        *,
+        qty: int | None = None,
+        limit_price: Decimal | None = None,
+        stop_price: Decimal | None = None,
+    ) -> SubmittedOrder:
+        """Modify a live order in place — how a trailing stop moves its stop leg.
+
+        Only the supplied fields change. Alpaca's replace returns a new order id,
+        which is reflected in the returned :class:`SubmittedOrder`.
+        """
+        ...
+
+    def close_position(self, symbol: str, qty: int | None = None) -> SubmittedOrder:
+        """Close one position. ``qty`` None closes it entirely; a value does a
+        partial close — the primitive a scale-out is built on."""
+        ...

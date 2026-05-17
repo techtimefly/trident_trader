@@ -44,6 +44,39 @@ class BracketOrderIntent:
         }
 
 
+@dataclass(frozen=True)
+class OrderIntent:
+    """A single-leg (non-bracket) order. Broker-agnostic.
+
+    Used for active position management — scale-in adds and explicit exits —
+    where a bracket's TP/SL children would be wrong. ``limit_price`` is required
+    for a ``limit`` order and must be None for a ``market`` order. ``reason``
+    records why the order exists (scale_in | scale_out | exit | manual) and
+    appears in the audit trail.
+    """
+
+    client_order_id: str
+    symbol: str
+    side: str  # "buy" | "sell"
+    qty: int
+    order_type: str  # "market" | "limit"
+    limit_price: Decimal | None
+    time_in_force: str  # "day"
+    reason: str  # scale_in | scale_out | exit | manual
+
+    def to_audit_payload(self) -> dict[str, object]:
+        return {
+            "client_order_id": self.client_order_id,
+            "symbol": self.symbol,
+            "side": self.side,
+            "qty": self.qty,
+            "order_type": self.order_type,
+            "limit_price": str(self.limit_price) if self.limit_price is not None else None,
+            "time_in_force": self.time_in_force,
+            "reason": self.reason,
+        }
+
+
 def _round_price(price: Decimal) -> Decimal:
     """Round to the nearest cent. Alpaca rejects orders with sub-penny prices."""
     return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

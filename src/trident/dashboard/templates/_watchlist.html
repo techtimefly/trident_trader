@@ -1,0 +1,66 @@
+{% if load_error %}
+<div class="empty">Could not load watchlist. Check the database connection.</div>
+{% else %}
+<div class="p-5 space-y-5">
+
+    <div>
+        <div class="text-xs dim uppercase tracking-widest mb-2">Active symbols</div>
+        {% if current %}
+        <div class="flex flex-wrap gap-2 items-center">
+            {% for sym in current.symbols %}
+            <span class="pill pill-dim mono">{{ sym }}</span>
+            {% endfor %}
+        </div>
+        <div class="text-xs dim mt-2 mono">
+            source: {{ current.source }} &middot; updated {{ current.updated_at }}
+        </div>
+        {% else %}
+        <div class="text-sm dim">No DB row active &mdash; runners use the static fallback: {{ fallback_csv }}.</div>
+        {% endif %}
+    </div>
+
+    <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML"
+          class="border-t border-[var(--border)] pt-4 space-y-3">
+        <input type="hidden" name="action" value="manual" />
+        <div>
+            <label class="text-xs dim uppercase tracking-widest block mb-1">Edit symbols (comma-separated)</label>
+            <input type="text" name="symbols"
+                   value="{{ current.symbols_csv if current else fallback_csv }}"
+                   placeholder="SPY, QQQ, AAPL, ..."
+                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+            <button class="btn btn-ghost text-sm" type="submit">Save watchlist</button>
+            {% if notice and not screen_notice %}
+            <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
+            {% endif %}
+        </div>
+    </form>
+
+    {% if screen_symbols %}
+    <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML"
+          class="border-t border-[var(--border)] pt-4">
+        <input type="hidden" name="action" value="promote" />
+        <div class="text-xs dim uppercase tracking-widest mb-2">Promote from latest screen ({{ screen_symbols | length }} symbols)</div>
+        <div class="flex flex-wrap gap-1 mb-3">
+            {% for sym in screen_symbols %}
+            <span class="pill pill-dim mono text-xs">{{ sym }}</span>
+            {% endfor %}
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+            <button class="btn btn-ghost text-sm" type="submit">Promote screener results</button>
+            {% if notice and screen_notice %}
+            <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
+            {% endif %}
+        </div>
+    </form>
+    {% else %}
+    <div class="border-t border-[var(--border)] pt-4 text-xs dim">
+        No screener results available. Run
+        <span class="mono">PYTHONPATH=src python scripts/screen.py</span>
+        to populate promote candidates.
+    </div>
+    {% endif %}
+
+</div>
+{% endif %}

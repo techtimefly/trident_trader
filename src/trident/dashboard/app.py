@@ -44,8 +44,10 @@ from trident.persistence.state import (
     last_heartbeat,
     set_kill_switch,
 )
+from trident.persistence.watchlist_store import get_active_watchlist, set_watchlist
 from trident.screener.persistence import get_latest_screen
 from trident.suggest.persistence import get_latest_suggestions
+from trident.watchlist import WATCHLIST
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -539,3 +541,107 @@ def _suggest_context() -> dict[str, Any]:
 @app.get("/api/suggest", response_class=HTMLResponse)
 def api_suggest(request: Request) -> Any:
     return templates.TemplateResponse(request, "_suggest.html", _suggest_context())
+
+
+def _watchlist_context(
+    notice: str | None = None, error: bool = False, screen_notice: bool = False
+) -> dict[str, Any]:
+    """Render context for the watchlist panel.
+
+    Defensive — outer-ring; a DB hiccup degrades the panel to a placeholder.
+    """
+    fallback_csv = ", ".join(WATCHLIST)
+    try:
+        active = get_active_watchlist()
+        current: dict[str, Any] | None = None
+        if active is not None:
+            current = {
+                "symbols": active.symbols,
+                "symbols_csv": ", ".join(active.symbols),
+                "source": active.source,
+                "updated_at": active.updated_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
+            }
+
+        screen_symbols: list[str] = []
+        try:
+            latest = get_latest_screen()
+            if latest is not None:
+                screen_symbols = [c.symbol for c in latest.matches]
+        except Exception:
+            pass
+
+    except Exception:
+        return {
+            "load_error": True,
+            "notice": notice,
+            "notice_error": error,
+            "screen_notice": screen_notice,
+            "fallback_csv": fallback_csv,
+        }
+
+    return {
+        "load_error": False,
+        "current": current,
+        "screen_symbols": screen_symbols[:30],
+        "fallback_csv": fallback_csv,
+        "notice": notice,
+        "notice_error": error,
+        "screen_notice": screen_notice,
+    }
+
+
+def _save_manual_watchlist(symbols_raw: str) -> tuple[str, bool]:
+    """Parse, normalize and persist a manual watchlist. Returns (notice, is_error)."""
+    symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
+    if not symbols:
+        return "Enter at least one symbol.", True
+    try:
+        set_watchlist(symbols, source="manual")
+    except ValueError as exc:
+        return str(exc), True
+    except Exception:
+        return "Could not save watchlist.", True
+    return f"Watchlist saved with {len(symbols)} symbols.", False
+
+
+def _promote_screener_watchlist() -> tuple[str, bool]:
+    """Promote the latest screener results into the active watchlist. Returns (notice, is_error)."""
+    try:
+        latest = get_latest_screen()
+    except Exception:
+        return "Could not read screener results.", True
+    if latest is None or not latest.matches:
+        return "No screener results to promote.", True
+    symbols = [c.symbol for c in latest.matches]
+    try:
+        set_watchlist(symbols, source="screener")
+    except ValueError as exc:
+        return str(exc), True
+    except Exception:
+        return "Could not save watchlist.", True
+    return f"Promoted {len(symbols)} symbols from the latest screen.", False
+
+
+@app.get("/api/watchlist", response_class=HTMLResponse)
+def api_watchlist(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_watchlist.html", _watchlist_context())
+
+
+@app.post("/api/watchlist", response_class=HTMLResponse)
+async def api_watchlist_save(request: Request) -> Any:
+    form = parse_qs((await request.body()).decode("utf-8"))
+    action = (form.get("action") or ["manual"])[0]
+
+    if action == "promote":
+        notice, error = _promote_screener_watchlist()
+        return templates.TemplateResponse(
+            request,
+            "_watchlist.html",
+            _watchlist_context(notice=notice, error=error, screen_notice=True),
+        )
+
+    symbols_raw = (form.get("symbols") or [""])[0]
+    notice, error = _save_manual_watchlist(symbols_raw)
+    return templates.TemplateResponse(
+        request, "_watchlist.html", _watchlist_context(notice=notice, error=error)
+    )

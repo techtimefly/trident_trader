@@ -22,7 +22,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 - [x] 3.2 Implement the new methods in `AlpacaBroker` + tests.
 - [x] 3.3 Add a single-leg `OrderIntent` + builder in `execution/orders.py` + tests.
 - [x] 3.4 Add the `ManagedPosition` table / order-leg linkage + migration `0009`.
-- [ ] 3.5 Add the `ManagementAction` union + an optional `manage()` method on the `Strategy` protocol + tests.
+- [x] 3.5 Add the `ManagementAction` union + an optional `manage()` method on the `Strategy` protocol + tests.
 - [ ] 3.6 Add per-bar open-position re-evaluation to the runners; scale-ins routed through the pure gate.
 - [ ] 3.7 Add dashboard manual-control endpoints (close one position, adjust stop/target, cancel one order).
 - [ ] 3.8 Update reconciliation to track bracket child legs and the live stop/target.

@@ -31,7 +31,7 @@ from trident.risk.gate import AccountState, MarketState, evaluate
 from trident.risk.limits import RiskLimits
 from trident.settings import get_settings
 from trident.strategies.registry import available_strategies, build_strategy
-from trident.watchlist import WATCHLIST
+from trident.watchlist import resolve_watchlist
 
 HEARTBEAT_INTERVAL_SECONDS = 5
 
@@ -45,11 +45,13 @@ async def main(strategy_name: str = "orb_5m") -> None:
         return
 
     store = BarStore()
-    strategy = build_strategy(strategy_name, WATCHLIST)
+    # Resolve the dashboard-approved watchlist (static fallback if none set).
+    watchlist = resolve_watchlist()
+    strategy = build_strategy(strategy_name, watchlist)
     # Crash recovery: replay today's persisted bars to warm the store and
     # rebuild strategy state, so a mid-session restart resumes correctly.
     try:
-        recovered = recover_strategy_state(strategy, store, WATCHLIST, now_et().date())
+        recovered = recover_strategy_state(strategy, store, watchlist, now_et().date())
         if recovered:
             log.info("session_state_recovered", bars=recovered)
     except Exception:
@@ -63,7 +65,7 @@ async def main(strategy_name: str = "orb_5m") -> None:
     starting_equity = await _fetch_starting_equity(settings)
     log.info(
         "shadow_run_start",
-        watchlist=WATCHLIST,
+        watchlist=watchlist,
         strategy=strategy.name,
         starting_equity=str(starting_equity),
     )
@@ -158,7 +160,7 @@ async def main(strategy_name: str = "orb_5m") -> None:
     feed = AlpacaBarFeed(
         api_key=settings.alpaca_api_key,
         api_secret=settings.alpaca_api_secret,
-        symbols=WATCHLIST,
+        symbols=watchlist,
         store=store,
         feed=settings.alpaca_data_feed,
     )

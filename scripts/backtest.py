@@ -30,6 +30,7 @@ from replay import fetch_minute_bars, fmt_money, trading_days_back
 from trident.audit.log import configure_logging, get_logger
 from trident.backtest.costs import CostModel
 from trident.backtest.engine import run_day
+from trident.backtest.persistence import save_replay
 from trident.backtest.simulator import SimulatedTrade
 from trident.backtest.stats import summarize
 from trident.backtest.walk_forward import walk_forward
@@ -169,6 +170,11 @@ def main() -> int:
         default=5,
         help="Walk-forward window size in trading days. Default: 5.",
     )
+    parser.add_argument(
+        "--no-persist",
+        action="store_true",
+        help="Skip writing the run to the database (the dashboard won't see it).",
+    )
     args = parser.parse_args()
 
     configure_logging()
@@ -219,6 +225,19 @@ def main() -> int:
 
     print_backtest_report(all_trades, costs, args.equity)
     print_walk_forward(all_trades, days, args.window_days)
+
+    if not args.no_persist and all_trades:
+        run_id = save_replay(
+            days=[datetime(d.year, d.month, d.day, tzinfo=UTC) for d in days],
+            equity=args.equity,
+            watchlist=WATCHLIST,
+            strategy="orb_5m",
+            trades=all_trades,
+            mode="honest",
+            costs=costs,
+        )
+        log.info("backtest_persisted", run_id=str(run_id), trades=len(all_trades))
+        print(f"Saved honest backtest {run_id} ({len(all_trades)} trades) — open the dashboard.")
     return 0
 
 

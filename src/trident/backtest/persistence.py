@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from trident.backtest.costs import CostModel
 from trident.backtest.simulator import SimulatedTrade
 from trident.backtest.stats import summarize
 from trident.persistence.models import ReplayRun, ReplayTrade
@@ -18,8 +19,15 @@ def save_replay(
     watchlist: list[str],
     strategy: str,
     trades: list[SimulatedTrade],
+    mode: str = "idealistic",
+    costs: CostModel | None = None,
 ) -> uuid.UUID:
-    """Insert one ReplayRun + one ReplayTrade per simulated trade. Returns run_id."""
+    """Insert one ReplayRun + one ReplayTrade per simulated trade. Returns run_id.
+
+    ``mode`` is "idealistic" (replay.py) or "honest" (backtest.py); ``costs`` is
+    the honest run's cost model, stored for display. Gross P&L and fees are
+    always stored — for an idealistic run they equal net P&L and zero.
+    """
     if not days:
         raise ValueError("save_replay requires at least one day")
 
@@ -41,6 +49,11 @@ def save_replay(
                 losses=summary.losses,
                 total_pnl=summary.total_pnl,
                 avg_r=summary.avg_r,
+                mode=mode,
+                slippage_bps=costs.slippage_bps if costs else None,
+                fee_per_share=costs.fee_per_share if costs else None,
+                gross_pnl=summary.gross_pnl,
+                total_fees=summary.total_fees,
             )
         )
         for t in trades:
@@ -61,6 +74,9 @@ def save_replay(
                     exit_price=t.exit_price,
                     pnl=t.pnl,
                     r_multiple=t.r_multiple,
+                    gross_pnl=t.gross_pnl,
+                    entry_fee=t.entry_fee,
+                    exit_fee=t.exit_fee,
                 )
             )
     return run_id

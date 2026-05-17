@@ -160,8 +160,16 @@ class ReplayRun(Base):
     num_trades: Mapped[int] = mapped_column()
     wins: Mapped[int] = mapped_column()
     losses: Mapped[int] = mapped_column()
-    total_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    total_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6))  # net of fees
     avg_r: Mapped[Decimal] = mapped_column(Numeric(8, 4))
+    # Honest-backtest fields (idealistic replay leaves cost columns NULL).
+    mode: Mapped[str] = mapped_column(
+        String(16), default="idealistic", server_default="idealistic"
+    )
+    slippage_bps: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    fee_per_share: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    gross_pnl: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    total_fees: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
 
 
 class ReplayTrade(Base):
@@ -182,8 +190,12 @@ class ReplayTrade(Base):
     exit_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     exit_reason: Mapped[str] = mapped_column(String(16))
     exit_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
-    pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6))  # net of fees
     r_multiple: Mapped[Decimal] = mapped_column(Numeric(8, 4))
+    # Honest-backtest fields (idealistic replay leaves these NULL).
+    gross_pnl: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    entry_fee: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    exit_fee: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
 
 
 class DailyPlan(Base):

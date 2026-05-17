@@ -12,7 +12,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 ## Phase 2 — Breadth
 - [x] 2.1 Add the `watchlists` table + Alembic migration `0008_watchlist` (chains from `0007_suggestion_tables`).
 - [x] 2.2 Add `src/trident/persistence/watchlist_store.py` (DB read/write helpers) + tests.
-- [ ] 2.3 Reroute `resolve_watchlist()` in `src/trident/watchlist.py` to the DB store with a static fallback — never resolve to empty + tests.
+- [x] 2.3 Reroute `resolve_watchlist()` in `src/trident/watchlist.py` to the DB store with a static fallback — never resolve to empty + tests.
 - [ ] 2.4 Add the dashboard `/api/watchlist` GET/POST panel (`_watchlist.html`) with a screener-promote action.
 - [ ] 2.5 Add one new strategy under the `Strategy` protocol that emits both long and short signals; register it in the registry; ship tests.
 - [ ] 2.6 Widen the gate's default entry-time window in `RiskLimits` to a wide outer bound + update gate tests (inner-ring — tests same commit). ORB keeps its own 11:00 cutoff.

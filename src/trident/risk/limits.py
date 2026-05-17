@@ -7,7 +7,10 @@ from decimal import Decimal
 
 @dataclass(frozen=True)
 class RiskLimits:
-    """Static, per-session limits. Loaded from config + .env at process start."""
+    """Pre-trade limits. The static fields load from config + .env at process
+    start. The Daily Plan fields (``daily_budget_pct``, ``max_day_trades``) are
+    merged in per evaluation by the runner from the user's per-day plan; ``None``
+    means that cap is not set."""
 
     risk_per_trade_pct: Decimal = Decimal("1.0")
     daily_loss_limit_pct: Decimal = Decimal("2.0")
@@ -21,6 +24,9 @@ class RiskLimits:
     no_entry_after: time = time(11, 0)
     max_spread_pct: Decimal = Decimal("0.2")  # refuse if (ask - bid) / mid > 0.2%
     min_avg_daily_volume: int = 1_000_000
+    # Daily Plan caps (set per trading day from the dashboard; None = no cap).
+    daily_budget_pct: Decimal | None = None  # cumulative notional opened today, % of equity
+    max_day_trades: int | None = None  # day-trades in a rolling 5-business-day window
 
 
 def daily_loss_remaining(

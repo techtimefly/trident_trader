@@ -17,7 +17,7 @@ from datetime import time
 from decimal import Decimal
 
 from trident.risk.limits import RiskLimits, daily_loss_tripped
-from trident.risk.sizing import position_fits_buying_power, position_notional, position_size
+from trident.risk.sizing import position_fits_buying_power, position_size
 from trident.strategies.base import Signal
 
 
@@ -27,6 +27,9 @@ class AccountState:
     starting_equity_today: Decimal
     buying_power: Decimal
     open_positions: dict[str, int] = field(default_factory=dict)  # symbol -> qty
+    # Daily Plan observed facts, computed by the runner (0 = no plan / nothing yet).
+    notional_deployed_today: Decimal = Decimal("0")
+    day_trades_in_window: int = 0
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,17 @@ def evaluate(
             f"Daily loss limit of {limits.daily_loss_limit_pct}% reached.",
         )
 
+    # Daily Plan: rolling-window day-trade cap (Pattern Day Trading discipline).
+    if (
+        limits.max_day_trades is not None
+        and account.day_trades_in_window >= limits.max_day_trades
+    ):
+        return _reject(
+            "day_trade_limit",
+            f"At rolling 5-day day-trade cap "
+            f"({account.day_trades_in_window}/{limits.max_day_trades}).",
+        )
+
     if signal.side == "long":
         if signal.stop_price >= signal.entry_price:
             return _reject(
@@ -139,10 +153,29 @@ def evaluate(
     # would silently drop every ORB signal on a high-priced name.
     max_notional = account.equity * (limits.max_position_notional_pct / Decimal("100"))
     shares_by_notional = int(max_notional / signal.entry_price)
-    shares = min(shares_by_risk, shares_by_notional)
+
+    # Daily Plan: cap by the day's capital budget. Like the notional cap, this
+    # sizes DOWN rather than rejecting outright. Phase-1 imprecision, accepted:
+    # the new order is measured at signal.entry_price (intended) while
+    # notional_deployed_today sums prior fills' actual prices, and in-flight
+    # unfilled orders are not yet counted.
+    shares_by_budget = shares_by_notional  # sentinel: no budget cap set
+    budget = Decimal("0")
+    if limits.daily_budget_pct is not None:
+        budget = account.equity * (limits.daily_budget_pct / Decimal("100"))
+        remaining = max(budget - account.notional_deployed_today, Decimal("0"))
+        shares_by_budget = int(remaining / signal.entry_price)
+
+    shares = min(shares_by_risk, shares_by_notional, shares_by_budget)
     sized_down = shares < shares_by_risk
 
     if shares <= 0:
+        if limits.daily_budget_pct is not None and shares_by_budget <= 0:
+            return _reject(
+                "budget_exhausted",
+                f"Daily capital budget exhausted: "
+                f"{account.notional_deployed_today:.2f} of {budget:.2f} deployed.",
+            )
         return _reject(
             "position_too_large",
             f"Even one share at {signal.entry_price} exceeds notional cap {max_notional:.2f}.",
@@ -156,7 +189,7 @@ def evaluate(
 
     detail = f"Approved {shares} shares of {signal.symbol} @ {signal.entry_price}."
     if sized_down:
-        detail += f" (sized down from {shares_by_risk} to fit {limits.max_position_notional_pct}% notional cap)"
+        detail += f" (sized down from {shares_by_risk} to fit notional/budget caps)"
 
     return GateDecision(
         approved=True,

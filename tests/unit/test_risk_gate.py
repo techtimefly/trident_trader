@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, time
 from decimal import Decimal
 
@@ -33,12 +34,16 @@ def make_account(
     starting: str = "50000",
     buying_power: str = "100000",
     open_positions: dict[str, int] | None = None,
+    notional_deployed_today: str = "0",
+    day_trades_in_window: int = 0,
 ) -> AccountState:
     return AccountState(
         equity=Decimal(equity),
         starting_equity_today=Decimal(starting),
         buying_power=Decimal(buying_power),
         open_positions=open_positions or {},
+        notional_deployed_today=Decimal(notional_deployed_today),
+        day_trades_in_window=day_trades_in_window,
     )
 
 
@@ -209,3 +214,115 @@ def test_short_circuit_order(kwargs: dict[str, object], expected_reason: str) ->
         assert decision.reason == "existing_position"
     else:
         assert decision.reason == expected_reason
+
+
+# --- Daily Plan: day-trade cap ---------------------------------------------------
+
+
+def test_rejects_at_day_trade_cap() -> None:
+    limits = replace(DEFAULTS, max_day_trades=3)
+    account = make_account(day_trades_in_window=3)
+    d = evaluate(make_signal(), account, MarketState(), limits, GOOD_TIME)
+    assert not d.approved
+    assert d.reason == "day_trade_limit"
+
+
+def test_allows_under_day_trade_cap() -> None:
+    limits = replace(DEFAULTS, max_day_trades=3)
+    account = make_account(day_trades_in_window=2)
+    d = evaluate(make_signal(), account, MarketState(), limits, GOOD_TIME)
+    assert d.approved
+
+
+def test_day_trade_cap_none_is_noop() -> None:
+    # No cap set — a huge day-trade count must not change the decision.
+    account = make_account(day_trades_in_window=999)
+    d = evaluate(make_signal(), account, MarketState(), DEFAULTS, GOOD_TIME)
+    assert d.approved
+
+
+# --- Daily Plan: capital budget --------------------------------------------------
+
+
+def test_budget_sizes_down() -> None:
+    # equity 10k, budget 10% = $1000 -> 10 shares @ $100. The risk budget (tight
+    # stop) would buy far more; the day's capital budget is the binding cap.
+    limits = replace(DEFAULTS, daily_budget_pct=Decimal("10"))
+    account = make_account(equity="10000", starting="10000", buying_power="10000000")
+    d = evaluate(
+        make_signal(entry="100", stop="99.90", target="105"),
+        account,
+        MarketState(),
+        limits,
+        GOOD_TIME,
+    )
+    assert d.approved
+    assert d.shares == 10
+    assert "sized down" in d.detail
+
+
+def test_budget_exhausted_rejects() -> None:
+    # Budget = 10% of $10k = $1000, already fully deployed today.
+    limits = replace(DEFAULTS, daily_budget_pct=Decimal("10"))
+    account = make_account(
+        equity="10000",
+        starting="10000",
+        buying_power="10000000",
+        notional_deployed_today="1000",
+    )
+    d = evaluate(make_signal(), account, MarketState(), limits, GOOD_TIME)
+    assert not d.approved
+    assert d.reason == "budget_exhausted"
+
+
+def test_budget_none_is_noop() -> None:
+    # No budget set — a huge deployed figure must not change the decision.
+    account = make_account(notional_deployed_today="999999999")
+    d = evaluate(make_signal(), account, MarketState(), DEFAULTS, GOOD_TIME)
+    assert d.approved
+
+
+def test_budget_exhausted_wins_over_position_too_large() -> None:
+    # Both the budget and the notional cap would zero out the share count; the
+    # specific, user-set budget cause must be the surfaced reason.
+    limits = replace(DEFAULTS, daily_budget_pct=Decimal("10"))
+    account = make_account(
+        equity="100",
+        starting="100",
+        buying_power="1000",
+        notional_deployed_today="10",  # budget = 10% of $100 = $10, fully used
+    )
+    d = evaluate(
+        make_signal(entry="60", stop="59", target="62"),
+        account,
+        MarketState(),
+        limits,
+        GOOD_TIME,
+    )
+    assert d.reason == "budget_exhausted"
+
+
+# --- Daily Plan: short-circuit ordering ------------------------------------------
+
+
+def test_daily_loss_limit_fires_before_day_trade_limit() -> None:
+    # Both the loss limit and the day-trade cap apply; the loss limit is earlier.
+    limits = replace(DEFAULTS, max_day_trades=2)
+    account = make_account(equity="48000", starting="50000", day_trades_in_window=2)
+    d = evaluate(make_signal(), account, MarketState(), limits, GOOD_TIME)
+    assert d.reason == "daily_loss_limit"
+
+
+def test_day_trade_limit_fires_before_signal_shape_checks() -> None:
+    # A bad stop and the day-trade cap both apply; the account-level cap, which
+    # sits earlier in the gate, must win.
+    limits = replace(DEFAULTS, max_day_trades=2)
+    account = make_account(day_trades_in_window=2)
+    d = evaluate(
+        make_signal(entry="100", stop="101", target="105"),  # bad_stop geometry
+        account,
+        MarketState(),
+        limits,
+        GOOD_TIME,
+    )
+    assert d.reason == "day_trade_limit"

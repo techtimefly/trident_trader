@@ -10,8 +10,10 @@ is correctness and discipline, not feature breadth.
 
 ## Current scope
 
-- **Strategy:** 5-minute Opening Range Breakout on liquid US large-caps
-  (SPY, QQQ, AAPL, MSFT, NVDA, AMD).
+- **Strategies:** selected by name from a registry — `orb_5m` (Opening Range
+  Breakout) and `vwap_reversion` (VWAP mean-reversion, long + short). Traded on a
+  DB-backed watchlist that defaults to liquid US large-caps (SPY, QQQ, AAPL, MSFT,
+  NVDA, AMD).
 - **Broker:** Alpaca paper account (the adapter refuses non-paper URLs).
 - **Data:** Alpaca's bundled IEX feed.
 - **Modes:**
@@ -96,7 +98,7 @@ This is **not** a real backtest — fills are idealistic (entry at the breakout
 bar's close, exits at exact stop or target). It's for sanity-checking the
 strategy on recent data and getting comfortable with the output shape before
 the next session opens. The honest backtest harness (slippage, fees,
-walk-forward) lands in v0.3.
+walk-forward) is `scripts/backtest.py`.
 
 ### 6b. Paper run (real bracket orders to the paper account)
 
@@ -177,31 +179,39 @@ store, and the ORB strategy. They run without a database or network.
 src/trident/
   settings.py          # pydantic-settings, loads .env
   clock.py             # market hours / holidays / early closes
-  data/                # WebSocket feed + bar store + bar persistence
-  strategies/          # Strategy protocol + ORB implementation
+  watchlist.py         # WATCHLIST constant + DB-backed resolve_watchlist()
+  data/                # WebSocket feed + bar store + bar persistence + backfill
+  strategies/          # Strategy protocol, registry, ORB + VWAP-reversion, management
   risk/                # the pre-trade gate, sizing, and limits
-  execution/           # Broker protocol + Alpaca adapter + bracket orders
-  portfolio/           # order tracking + position reconciliation
+  execution/           # Broker protocol + Alpaca adapter + bracket/single-leg orders
+  portfolio/           # order tracking + position reconciliation + management
+  accounting/          # pure round-trip + wash-sale computation
+  screener/            # stock-screener criteria + filter/rank engine
+  suggest/             # AI pre-market stock suggestions
   safety/              # EOD flatten
-  backtest/            # idealistic fill simulator used by replay
+  backtest/            # fill simulator + honest backtest + strategy comparison
   audit/               # append-only event log + structured logging
   persistence/         # SQLAlchemy models + migrations + kill switch state
   dashboard/           # FastAPI + HTMX dashboard (localhost only)
 tests/unit/            # pure-function tests for the safety-critical code
-scripts/               # smoke_test, shadow_run, replay, paper_run, deadman,
-                       # run_dashboard, backfill_daily
+scripts/               # smoke_test, shadow_run, replay, backtest, compare,
+                       # paper_run, deadman, run_dashboard, backfill_daily,
+                       # screen, suggest
 ```
 
 ## Roadmap
 
 - **v0.1:** scaffolding, market clock, data feed, strategy, risk gate,
   dashboard with kill switch.
-- **v0.2 (current):** Alpaca execution adapter, bracket orders with
+- **v0.2:** Alpaca execution adapter, bracket orders with
   idempotency keys, polling-based order tracking, reconciliation loop,
   dead-man's switch, EOD flatten, paper_run.py.
-- **v0.3:** Trade-updates WebSocket (replace polling), partial-fill
-  handling, scale-out at 1R + trailing remainder, backtest harness with
-  honest slippage + walk-forward.
+- **Phases 1–5 (current):** pluggable strategy registry + comparison tooling,
+  a VWAP mean-reversion strategy, a DB-backed dynamic watchlist, active
+  position management, per-trade P&L + wash-sale accounting, crash recovery,
+  and an honest backtest harness (slippage, fees, walk-forward). See
+  `docs/ROADMAP.md` and `docs/ROADMAP_PROGRESS.md`.
+- **v0.3:** Trade-updates WebSocket (replace polling), partial-fill handling.
 - **v0.4:** LLM-narrated trade journal (Claude or GPT, one model, cached).
 - **Some day:** Real money. After at least 8 consecutive weeks of paper
   profitability across at least one regime change, **and** a clean audit-log

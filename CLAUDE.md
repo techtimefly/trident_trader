@@ -34,8 +34,9 @@ not.
 
 ## Architecture
 
-Bars flow in from Alpaca, a strategy proposes trades, a pure risk gate vets them,
-and (only in paper mode) approved trades become bracket orders:
+Bars flow in from Alpaca, a strategy (selected by name from the registry) proposes
+trades, a pure risk gate vets them, and (only in paper mode) approved trades become
+bracket orders:
 
 ```
 AlpacaBarFeed (WebSocket, IEX)
@@ -53,9 +54,13 @@ AlpacaBarFeed (WebSocket, IEX)
                           AlpacaBroker.submit_bracket()  (paper account)
 ```
 
-`paper_run.py` additionally runs four background loops: heartbeat (5s), order
-polling (`sync_orders`, 10s), position reconciliation (`reconcile_positions`, 60s),
-and a one-shot EOD flatten 5 minutes before the close.
+The strategy is built via `strategies/registry.build_strategy(name, symbols)`
+(`orb_5m`, `vwap_reversion`); the watchlist comes from
+`watchlist.resolve_watchlist()`. `paper_run.py` additionally runs four background
+loops: heartbeat (5s), order polling (`sync_orders`, 10s), position reconciliation
+(`reconcile_positions`, 60s), and a one-shot EOD flatten 5 minutes before the close.
+It also re-evaluates each open `managed_position` every bar via the strategy's
+optional `manage()` method, translating `ManagementAction`s into broker calls.
 
 ### Concentric rings — rigor scales inward
 
@@ -81,10 +86,15 @@ it carefully.
   the runner). Flattens everything if the runner's heartbeat goes stale (>45s) and
   open positions/orders exist. Always run it alongside `paper_run.py`.
 - `scripts/replay.py` — feeds historical 1-min bars through the same strategy +
-  gate, then simulates fills. Not a real backtest (idealistic fills, no slippage/
-  fees); for sanity-checking only. The honest harness lands in v0.3.
+  gate, then simulates fills. Idealistic (no slippage/fees); for sanity-checking
+  only.
+- `scripts/backtest.py` — the honest harness: same replay but with slippage and
+  fees modeled and walk-forward windowing.
+- `scripts/compare.py` — replays several registered strategies over the same bars
+  with the same costs, side by side.
 
 There is no `live_run.py`. Do not create one without explicit direction.
+`docs/LIVE_TRADING.md` is the gated design note for that future run mode.
 
 ### Key invariants
 
@@ -99,15 +109,17 @@ There is no `live_run.py`. Do not create one without explicit direction.
   state, write a new event.
 - The **kill switch** lives in the `system_state` table; the dashboard toggles it
   and the runner reads it before every gate evaluation, no restart needed.
-- The **watchlist is a `WATCHLIST` constant duplicated** in `shadow_run.py`,
-  `paper_run.py`, `replay.py`, and `backfill_daily.py` — changing it means editing
-  each.
+- The **watchlist is owned by `src/trident/watchlist.py`.** Runners call
+  `resolve_watchlist()`, which reads the most-recently-activated row from the
+  `watchlists` table and falls back to the static `WATCHLIST` constant if no active
+  row exists (never resolves to empty). The dashboard's `/api/watchlist` panel
+  edits it.
 
 ## Common commands
 
 ```bash
 # Setup (one-time)
-docker compose up -d postgres
+docker-compose up -d postgres
 pip install -e ".[dev]"
 alembic upgrade head
 
@@ -143,7 +155,7 @@ exist".
 
 ## Test policy
 
-- ~80 unit tests; they run in <1s and need no network or database.
+- ~319 unit tests; they run in <1s and need no network or database.
 - Risk gate, position sizing, ORB, EOD timing, and the fill simulator have
   exhaustive branch coverage.
 - Inner-ring code (gate, execution, safety, portfolio) must ship with tests in the
@@ -162,8 +174,7 @@ exist".
    `TypeError: unhashable type: 'dict'` (the context dict becomes a Jinja cache
    key). All dashboard endpoints follow this.
 4. **Codespaces port-forwarding.** `scripts/run_dashboard.py` binds `0.0.0.0` by
-   default so forwarded ports work; respect the `DASHBOARD_HOST` override. (The
-   README's "binds to 127.0.0.1" line is stale — the launcher is authoritative.)
+   default so forwarded ports work; respect the `DASHBOARD_HOST` override.
 5. **ORB target geometry.** `target = entry + (entry - stop)` — a true 1R from
    entry. The earlier `target = entry + (OR_high - OR_low)` biased realized R to
    ~0.6 because the breakout bar closes above OR_high.

@@ -65,6 +65,11 @@ class Order(Base):
     )
     client_order_id: Mapped[str] = mapped_column(String(64), unique=True)
     broker_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # A bracket child leg (take-profit / stop-loss) points at its parent entry
+    # order. NULL for a parent or a standalone single-leg order.
+    parent_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("orders.id"), nullable=True, index=True
+    )
 
     symbol: Mapped[str] = mapped_column(String(16), index=True)
     side: Mapped[str] = mapped_column(String(8))
@@ -103,6 +108,34 @@ class Position(Base):
     stop_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
     target_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ManagedPosition(Base):
+    """A position the runner actively manages.
+
+    Distinct from the ``positions`` table, which the reconciler keeps as a plain
+    mirror of the broker. ``ManagedPosition`` carries the *live, mutable* stop and
+    target a trailing stop updates, the strategy that opened it, and a link back
+    to the entry order. One row per open managed position; removed when the
+    position closes.
+    """
+
+    __tablename__ = "managed_positions"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol: Mapped[str] = mapped_column(String(16), unique=True)
+    strategy: Mapped[str] = mapped_column(String(64))
+    side: Mapped[str] = mapped_column(String(8))  # long | short
+    qty: Mapped[int] = mapped_column()  # signed: negative = short
+    avg_entry: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    # Live stop/target — a trailing-stop or manual adjustment mutates these.
+    stop_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    target_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    entry_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("orders.id"), nullable=True
+    )
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Bar(Base):

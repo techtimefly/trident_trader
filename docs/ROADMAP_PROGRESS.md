@@ -19,7 +19,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 
 ## Phase 3 — Active position management
 - [x] 3.1 Extend the `Broker` protocol with `submit_order` / `cancel_order` / `replace_order` / `close_position` + protocol/fake-broker tests.
-- [ ] 3.2 Implement the new methods in `AlpacaBroker` + tests.
+- [x] 3.2 Implement the new methods in `AlpacaBroker` + tests.
 - [ ] 3.3 Add a single-leg `OrderIntent` + builder in `execution/orders.py` + tests.
 - [ ] 3.4 Add the `ManagedPosition` table / order-leg linkage + migration `0009`.
 - [ ] 3.5 Add the `ManagementAction` union + an optional `manage()` method on the `Strategy` protocol + tests.

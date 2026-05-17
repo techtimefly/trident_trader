@@ -16,7 +16,7 @@ from typing import Any
 
 from trident.audit.log import get_logger, record
 from trident.execution.broker import OrderSnapshot, PositionSnapshot, SubmittedOrder
-from trident.execution.orders import BracketOrderIntent
+from trident.execution.orders import BracketOrderIntent, OrderIntent
 from trident.settings import get_settings
 
 log = get_logger("execution.alpaca")
@@ -146,6 +146,174 @@ class AlpacaBroker:
                 )
             )
         return rows
+
+    # --- Active position management ---------------------------------------
+
+    def submit_order(self, intent: OrderIntent) -> SubmittedOrder:
+        """Submit a single-leg market or limit order (a scale-in add or an exit)."""
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
+
+        side = OrderSide.BUY if intent.side == "buy" else OrderSide.SELL
+        if intent.order_type == "limit":
+            if intent.limit_price is None:
+                raise ValueError("limit order requires a limit_price")
+            req: Any = LimitOrderRequest(
+                symbol=intent.symbol,
+                qty=intent.qty,
+                side=side,
+                time_in_force=TimeInForce.DAY,
+                limit_price=float(intent.limit_price),
+                client_order_id=intent.client_order_id,
+            )
+        else:
+            req = MarketOrderRequest(
+                symbol=intent.symbol,
+                qty=intent.qty,
+                side=side,
+                time_in_force=TimeInForce.DAY,
+                client_order_id=intent.client_order_id,
+            )
+
+        record("order_submitting", actor="execution.alpaca", payload=intent.to_audit_payload())
+        try:
+            # The SDK types this Order | RawData; we never pass raw_data, so it
+            # is always an Order. Annotate Any to keep attribute access clean.
+            order: Any = self._client.submit_order(req)
+        except Exception as exc:
+            record(
+                "order_submit_failed",
+                actor="execution.alpaca",
+                payload={"client_order_id": intent.client_order_id, "error": str(exc)[:500]},
+            )
+            raise
+
+        submitted = SubmittedOrder(
+            broker_order_id=str(order.id),
+            client_order_id=intent.client_order_id,
+            status=str(order.status).split(".")[-1].lower(),
+        )
+        record(
+            "order_submitted",
+            actor="execution.alpaca",
+            payload={
+                "client_order_id": submitted.client_order_id,
+                "broker_order_id": submitted.broker_order_id,
+                "status": submitted.status,
+                "reason": intent.reason,
+            },
+        )
+        return submitted
+
+    def cancel_order(self, broker_order_id: str) -> None:
+        """Cancel one order by its broker id."""
+        try:
+            self._client.cancel_order_by_id(broker_order_id)
+        except Exception as exc:
+            record(
+                "order_cancel_failed",
+                actor="execution.alpaca",
+                payload={"broker_order_id": broker_order_id, "error": str(exc)[:500]},
+            )
+            raise
+        record(
+            "order_cancelled",
+            actor="execution.alpaca",
+            payload={"broker_order_id": broker_order_id},
+        )
+
+    def replace_order(
+        self,
+        broker_order_id: str,
+        *,
+        qty: int | None = None,
+        limit_price: Decimal | None = None,
+        stop_price: Decimal | None = None,
+    ) -> SubmittedOrder:
+        """Modify a live order in place — how a trailing stop moves its stop leg.
+
+        Alpaca's replace returns a NEW order id; the returned SubmittedOrder
+        carries it so callers can re-track the order.
+        """
+        from alpaca.trading.requests import ReplaceOrderRequest
+
+        req = ReplaceOrderRequest(
+            qty=qty,
+            limit_price=float(limit_price) if limit_price is not None else None,
+            stop_price=float(stop_price) if stop_price is not None else None,
+        )
+        record(
+            "order_replacing",
+            actor="execution.alpaca",
+            payload={
+                "broker_order_id": broker_order_id,
+                "qty": qty,
+                "limit_price": str(limit_price) if limit_price is not None else None,
+                "stop_price": str(stop_price) if stop_price is not None else None,
+            },
+        )
+        try:
+            order: Any = self._client.replace_order_by_id(broker_order_id, req)
+        except Exception as exc:
+            record(
+                "order_replace_failed",
+                actor="execution.alpaca",
+                payload={"broker_order_id": broker_order_id, "error": str(exc)[:500]},
+            )
+            raise
+
+        submitted = SubmittedOrder(
+            broker_order_id=str(order.id),
+            client_order_id=str(order.client_order_id) if order.client_order_id else "",
+            status=str(order.status).split(".")[-1].lower(),
+        )
+        record(
+            "order_replaced",
+            actor="execution.alpaca",
+            payload={
+                "old_broker_order_id": broker_order_id,
+                "new_broker_order_id": submitted.broker_order_id,
+                "status": submitted.status,
+            },
+        )
+        return submitted
+
+    def close_position(self, symbol: str, qty: int | None = None) -> SubmittedOrder:
+        """Close one position. ``qty`` None closes it entirely; a value does a
+        partial close (the scale-out primitive)."""
+        from alpaca.trading.requests import ClosePositionRequest
+
+        close_options = ClosePositionRequest(qty=str(qty)) if qty is not None else None
+        record(
+            "position_closing",
+            actor="execution.alpaca",
+            payload={"symbol": symbol, "qty": qty},
+        )
+        try:
+            order: Any = self._client.close_position(symbol, close_options=close_options)
+        except Exception as exc:
+            record(
+                "position_close_failed",
+                actor="execution.alpaca",
+                payload={"symbol": symbol, "qty": qty, "error": str(exc)[:500]},
+            )
+            raise
+
+        submitted = SubmittedOrder(
+            broker_order_id=str(order.id),
+            client_order_id=str(order.client_order_id) if order.client_order_id else "",
+            status=str(order.status).split(".")[-1].lower(),
+        )
+        record(
+            "position_closed_one",
+            actor="execution.alpaca",
+            payload={
+                "symbol": symbol,
+                "qty": qty,
+                "broker_order_id": submitted.broker_order_id,
+            },
+        )
+        return submitted
 
 
 def _snapshot(o: Any) -> OrderSnapshot:

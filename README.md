@@ -147,9 +147,11 @@ Open <http://127.0.0.1:8765>. The page shows:
   signal until you release it. The toggle is persisted to the `system_state`
   table so the shadow runner sees it without needing a restart.
 
-The dashboard binds to `127.0.0.1` only. To access from another device, use
-Tailscale (`tailscale serve`) or SSH port-forwarding — do not expose it to the
-public internet.
+The dashboard has no auth. The launcher binds to `0.0.0.0` by default so
+Codespaces / Docker port-forwarding works; on a personal machine set
+`DASHBOARD_HOST=127.0.0.1` to keep it off your LAN. Either way, do not expose it
+to the public internet — to reach it from another device, use Tailscale
+(`tailscale serve`) or SSH port-forwarding.
 
 ### Tail logs / query the DB
 

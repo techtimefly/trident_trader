@@ -1,0 +1,50 @@
+<div class="p-5 space-y-5">
+    <div class="text-xs dim">
+        Manual overrides for an open position. Close one position, adjust its
+        live managed stop, or cancel a single order by broker id.
+        {% if open_symbols %}
+            <div class="mt-1">Open symbols:
+                {% for sym in open_symbols %}<span class="pill pill-dim mono">{{ sym }}</span>{% endfor %}
+            </div>
+        {% endif %}
+    </div>
+
+    <form hx-post="/api/manage" hx-target="#manage" hx-swap="innerHTML"
+          class="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-4">
+        <div>
+            <label class="text-xs dim uppercase tracking-widest block mb-1">Close position</label>
+            <input type="text" name="symbol" placeholder="AAPL"
+                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-28" />
+        </div>
+        <button class="btn btn-danger text-sm" type="submit" name="action" value="close">Close</button>
+    </form>
+
+    <form hx-post="/api/manage" hx-target="#manage" hx-swap="innerHTML"
+          class="flex flex-wrap items-end gap-3">
+        <div>
+            <label class="text-xs dim uppercase tracking-widest block mb-1">Adjust stop &mdash; symbol</label>
+            <input type="text" name="symbol" placeholder="AAPL"
+                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-28" />
+        </div>
+        <div>
+            <label class="text-xs dim uppercase tracking-widest block mb-1">New stop</label>
+            <input type="number" name="stop_price" step="0.01" min="0" placeholder="0.00"
+                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-28" />
+        </div>
+        <button class="btn btn-ghost text-sm" type="submit" name="action" value="stop">Set stop</button>
+    </form>
+
+    <form hx-post="/api/manage" hx-target="#manage" hx-swap="innerHTML"
+          class="flex flex-wrap items-end gap-3">
+        <div class="flex-1 min-w-[14rem]">
+            <label class="text-xs dim uppercase tracking-widest block mb-1">Cancel order &mdash; broker id</label>
+            <input type="text" name="order_id" placeholder="broker order id"
+                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+        </div>
+        <button class="btn btn-ghost text-sm" type="submit" name="action" value="cancel">Cancel order</button>
+    </form>
+
+    {% if notice %}
+        <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
+    {% endif %}
+</div>

@@ -9,6 +9,7 @@ Run with:
 """
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -644,4 +645,90 @@ async def api_watchlist_save(request: Request) -> Any:
     notice, error = _save_manual_watchlist(symbols_raw)
     return templates.TemplateResponse(
         request, "_watchlist.html", _watchlist_context(notice=notice, error=error)
+    )
+
+
+def _manage_context(notice: str | None = None, error: bool = False) -> dict[str, Any]:
+    """Context for the manual-control panel: open symbols + a notice.
+
+    Defensive — outer-ring; an Alpaca hiccup degrades to an empty symbol hint
+    rather than 500-ing the page.
+    """
+    open_symbols: list[str] = []
+    with contextlib.suppress(Exception):
+        open_symbols = [p.symbol for p in list_positions()]
+    return {"notice": notice, "notice_error": error, "open_symbols": open_symbols}
+
+
+def _do_manage_action(action: str, form: dict[str, list[str]]) -> tuple[str, bool]:
+    """Execute one manual-control action. Returns (notice, is_error).
+
+    The broker is constructed lazily and defensively — if credentials are
+    missing the panel reports it rather than crashing.
+    """
+    symbol = (form.get("symbol") or [""])[0].strip().upper()
+    if action == "stop":
+        # Adjusting the live managed stop is a DB write — no broker needed.
+        stop_raw = (form.get("stop_price") or [""])[0].strip()
+        if not symbol:
+            return "Symbol is required.", True
+        try:
+            new_stop = Decimal(stop_raw)
+            if new_stop <= 0:
+                return "Stop price must be positive.", True
+        except (ValueError, ArithmeticError):
+            return "Could not parse the stop price.", True
+        try:
+            from trident.persistence import managed_position
+
+            managed_position.update_stop(symbol, new_stop)
+        except Exception:
+            return f"Failed to update the stop for {symbol}.", True
+        return f"Stop for {symbol} set to {_plain_decimal(new_stop)}.", False
+
+    # close / cancel both need the broker.
+    try:
+        from trident.execution.alpaca import AlpacaBroker
+
+        broker = AlpacaBroker()
+    except Exception:
+        return "Broker unavailable — check Alpaca credentials.", True
+
+    if action == "close":
+        if not symbol:
+            return "Symbol is required.", True
+        try:
+            broker.close_position(symbol)
+            from trident.persistence import managed_position
+
+            managed_position.remove(symbol)
+        except Exception:
+            return f"Failed to close {symbol}.", True
+        return f"Close order submitted for {symbol}.", False
+
+    if action == "cancel":
+        order_id = (form.get("order_id") or [""])[0].strip()
+        if not order_id:
+            return "Order id is required.", True
+        try:
+            broker.cancel_order(order_id)
+        except Exception:
+            return "Failed to cancel that order.", True
+        return f"Cancel submitted for order {order_id}.", False
+
+    return f"Unknown action {action!r}.", True
+
+
+@app.get("/api/manage", response_class=HTMLResponse)
+def api_manage(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_manage.html", _manage_context())
+
+
+@app.post("/api/manage", response_class=HTMLResponse)
+async def api_manage_action(request: Request) -> Any:
+    form = parse_qs((await request.body()).decode("utf-8"))
+    action = (form.get("action") or ["close"])[0]
+    notice, error = _do_manage_action(action, form)
+    return templates.TemplateResponse(
+        request, "_manage.html", _manage_context(notice=notice, error=error)
     )

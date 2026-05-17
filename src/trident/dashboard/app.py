@@ -18,6 +18,7 @@ from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
@@ -52,9 +53,11 @@ from trident.suggest.persistence import get_latest_suggestions
 from trident.watchlist import WATCHLIST
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
 
 configure_logging()
 app = FastAPI(title="Trident Trader")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 

@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     alpaca_base_url: str = "https://paper-api.alpaca.markets"
     alpaca_data_feed: str = "iex"
 
+    # Anthropic API key for the AI stock-suggestions feature (trident.suggest).
+    # Optional — when blank, the suggest client degrades gracefully and returns
+    # an empty result rather than calling the network or crashing.
+    anthropic_api_key: str = ""
+
     database_url: str = "postgresql+psycopg2://trident:trident@localhost:5432/trident"
 
     risk_per_trade_pct: Decimal = Field(default=Decimal("1.0"))

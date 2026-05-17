@@ -210,3 +210,47 @@ class DailyPlan(Base):
     max_day_trades: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScreenRun(Base):
+    """One row per `scripts/screen.py` invocation — the criteria and counts.
+
+    The screener is outer-ring: a failed run loses no capital, it just leaves
+    the dashboard panel showing the previous run. The filter bounds are stored
+    as columns (NULL = no bound) so the dashboard can echo the screen back.
+    """
+
+    __tablename__ = "screen_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    universe_size: Mapped[int] = mapped_column()  # symbols requested from Alpaca
+    scanned: Mapped[int] = mapped_column()  # symbols with usable bar data
+    matched: Mapped[int] = mapped_column()  # symbols passing every filter
+    lookback_days: Mapped[int] = mapped_column()
+    # Filter bounds — NULL means that bound was not applied.
+    min_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    max_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    min_avg_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    min_change_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    max_change_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+
+    results: Mapped[list[ScreenResultRow]] = relationship(back_populates="run")
+
+
+class ScreenResultRow(Base):
+    """One matched symbol from a screen run, with its market facts at scan time."""
+
+    __tablename__ = "screen_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("screen_runs.id"), index=True
+    )
+    rank: Mapped[int] = mapped_column()  # 1-based position in the ranked table
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    avg_volume: Mapped[int] = mapped_column(BigInteger)
+    change_pct: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+
+    run: Mapped[ScreenRun] = relationship(back_populates="results")

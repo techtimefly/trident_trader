@@ -44,6 +44,7 @@ from trident.persistence.state import (
     last_heartbeat,
     set_kill_switch,
 )
+from trident.screener.persistence import get_latest_screen
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -385,3 +386,53 @@ def api_replay(request: Request) -> Any:
     return templates.TemplateResponse(
         request, "_replay.html", {"run": run_view, "rows": rows}
     )
+
+
+def _fmt_volume(v: int) -> str:
+    """Compact share-volume label: 2.4M, 530K, or the raw count."""
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.1f}M"
+    if v >= 1_000:
+        return f"{v / 1_000:.0f}K"
+    return str(v)
+
+
+def _screen_context() -> dict[str, Any]:
+    """Render context for the screener panel: the latest run + its matches.
+
+    Defensive — the screener is outer-ring; a DB hiccup degrades the panel to
+    a placeholder rather than 500-ing the page.
+    """
+    try:
+        latest = get_latest_screen()
+    except Exception:
+        return {"run": None, "rows": [], "load_error": True}
+    if latest is None:
+        return {"run": None, "rows": [], "load_error": False}
+
+    crit = latest.criteria
+    run_view = {
+        "started_at": latest.started_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
+        "universe_size": latest.universe_size,
+        "scanned": latest.scanned,
+        "matched": latest.matched,
+        "lookback_days": latest.lookback_days,
+        "filters": crit.describe(),
+    }
+    rows = [
+        {
+            "rank": idx,
+            "symbol": c.symbol,
+            "price": _fmt_money(c.price),
+            "avg_volume": _fmt_volume(c.avg_volume),
+            "change_pct": _fmt_pct(c.change_pct),
+            "change_positive": c.change_pct >= 0,
+        }
+        for idx, c in enumerate(latest.matches, start=1)
+    ]
+    return {"run": run_view, "rows": rows, "load_error": False}
+
+
+@app.get("/api/screen", response_class=HTMLResponse)
+def api_screen(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_screen.html", _screen_context())

@@ -1,0 +1,67 @@
+{% if load_error %}
+<div class="empty">Could not load the latest screen. Check the database connection.</div>
+{% elif run %}
+<div class="px-5 py-4 border-b border-[var(--border)]">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Universe</div>
+            <div class="mono text-xl mt-1">{{ run.universe_size }}</div>
+            <div class="text-xs dim mt-1">symbols requested</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Scanned</div>
+            <div class="mono text-xl mt-1">{{ run.scanned }}</div>
+            <div class="text-xs dim mt-1">with usable bars</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Matched</div>
+            <div class="mono text-xl mt-1">{{ run.matched }}</div>
+            <div class="text-xs dim mt-1">passed every filter</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Lookback</div>
+            <div class="mono text-xl mt-1">{{ run.lookback_days }}d</div>
+            <div class="text-xs dim mt-1">avg vol &amp; % change</div>
+        </div>
+    </div>
+    <div class="text-xs dim mt-3">
+        <span class="pill pill-dim">filters</span> {{ run.filters }} &middot; run {{ run.started_at }}
+    </div>
+</div>
+
+{% if rows %}
+<div class="max-h-96 overflow-y-auto">
+<table class="tt mono text-sm">
+    <thead class="sticky top-0 bg-[var(--panel)]">
+        <tr>
+            <th>#</th>
+            <th>Symbol</th>
+            <th>Price</th>
+            <th>Avg Vol</th>
+            <th>Change %</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="dim">{{ r.rank }}</td>
+            <td class="font-semibold">{{ r.symbol }}</td>
+            <td>{{ r.price }}</td>
+            <td>{{ r.avg_volume }}</td>
+            <td class="{{ 'pos' if r.change_positive else 'neg' }}">{{ r.change_pct }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="empty">The latest screen matched no symbols. Loosen the filters and re-run.</div>
+{% endif %}
+
+{% else %}
+<div class="empty">
+    No screen run yet. Run
+    <span class="mono">PYTHONPATH=src python scripts/screen.py --max-price 1.00 --min-avg-volume 1000000 --limit 500</span>
+    and refresh.
+</div>
+{% endif %}

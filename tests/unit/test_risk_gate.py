@@ -66,13 +66,25 @@ def test_rejects_when_kill_switch_engaged() -> None:
 
 
 def test_rejects_before_no_entry_before() -> None:
-    d = evaluate(make_signal(), make_account(), MarketState(), DEFAULTS, time(9, 31))
+    d = evaluate(make_signal(), make_account(), MarketState(), DEFAULTS, time(9, 29))
     assert d.reason == "too_early"
 
 
 def test_rejects_after_no_entry_after() -> None:
-    d = evaluate(make_signal(), make_account(), MarketState(), DEFAULTS, time(11, 0))
+    d = evaluate(make_signal(), make_account(), MarketState(), DEFAULTS, time(15, 55))
     assert d.reason == "too_late"
+
+
+def test_default_wide_window_allows_midday_entry() -> None:
+    # Before item 2.6 the default no_entry_after was 11:00; 13:00 must now be approved.
+    d = evaluate(make_signal(), make_account(), MarketState(), DEFAULTS, time(13, 0))
+    assert d.approved
+
+
+def test_default_wide_window_allows_market_open() -> None:
+    # no_entry_before is now 9:30 (market open), so 9:30 itself must be allowed.
+    d = evaluate(make_signal(), make_account(), MarketState(), DEFAULTS, time(9, 30))
+    assert d.approved
 
 
 def test_rejects_existing_position() -> None:
@@ -197,7 +209,7 @@ def test_rejects_when_even_one_share_exceeds_notional_cap() -> None:
     [
         ({}, "ok"),
         ({"kill": True}, "kill_switch"),
-        ({"now": time(9, 30)}, "too_early"),
+        ({"now": time(9, 29)}, "too_early"),
     ],
 )
 def test_short_circuit_order(kwargs: dict[str, object], expected_reason: str) -> None:

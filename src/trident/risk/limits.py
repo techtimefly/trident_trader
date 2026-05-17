@@ -20,8 +20,8 @@ class RiskLimits:
     # The cap is a concentration backstop, not the primary safety. Gate sizes DOWN
     # to fit; the risk-per-trade budget then becomes the binding constraint.
     max_position_notional_pct: Decimal = Decimal("50")
-    no_entry_before: time = time(9, 35)
-    no_entry_after: time = time(11, 0)
+    no_entry_before: time = time(9, 30)   # wide outer bound; each strategy narrows this
+    no_entry_after: time = time(15, 55)  # wide outer bound; each strategy narrows this
     max_spread_pct: Decimal = Decimal("0.2")  # refuse if (ask - bid) / mid > 0.2%
     min_avg_daily_volume: int = 1_000_000
     # Daily Plan caps (set per trading day from the dashboard; None = no cap).

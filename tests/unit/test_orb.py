@@ -158,6 +158,21 @@ def test_resets_for_new_day() -> None:
     assert strat.on_bar(next_bar, store) is not None
 
 
+def test_orb_11am_cutoff_survives_wider_gate_window() -> None:
+    """Regression (item 2.6): widening the gate's no_entry_after to 15:55 must not
+    change ORB's own LAST_ENTRY = 11:00 check inside on_bar."""
+    strat = OpeningRangeBreakout(symbols=["AAPL"])
+    store = BarStore()
+    for i in range(5):
+        strat.on_bar(or_bar("AAPL", i, "101.0", "99.0", "100.0", volume=10_000), store)
+    # At 11:00 ET the ORB's internal cutoff fires — no signal, regardless of gate window.
+    bar = post_or_bar("AAPL", time(11, 0), "101.5", volume=50_000)
+    assert strat.on_bar(bar, store) is None
+    # Stays silent at 13:00 — well past the internal cutoff.
+    bar_pm = post_or_bar("AAPL", time(13, 0), "102.0", volume=50_000)
+    assert strat.on_bar(bar_pm, store) is None
+
+
 def test_dropping_old_day_state_with_reset() -> None:
     strat = OpeningRangeBreakout(symbols=["AAPL"])
     store = BarStore()

@@ -15,7 +15,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 - [x] 2.3 Reroute `resolve_watchlist()` in `src/trident/watchlist.py` to the DB store with a static fallback — never resolve to empty + tests.
 - [x] 2.4 Add the dashboard `/api/watchlist` GET/POST panel (`_watchlist.html`) with a screener-promote action.
 - [x] 2.5 Add one new strategy under the `Strategy` protocol that emits both long and short signals; register it in the registry; ship tests.
-- [ ] 2.6 Widen the gate's default entry-time window in `RiskLimits` to a wide outer bound + update gate tests (inner-ring — tests same commit). ORB keeps its own 11:00 cutoff.
+- [x] 2.6 Widen the gate's default entry-time window in `RiskLimits` to a wide outer bound + update gate tests (inner-ring — tests same commit). ORB keeps its own 11:00 cutoff.
 
 ## Phase 3 — Active position management
 - [ ] 3.1 Extend the `Broker` protocol with `submit_order` / `cancel_order` / `replace_order` / `close_position` + protocol/fake-broker tests.

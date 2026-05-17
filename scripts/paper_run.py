@@ -14,6 +14,7 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import signal as os_signal
 from dataclasses import replace
@@ -37,9 +38,8 @@ from trident.risk.gate import AccountState, MarketState, evaluate
 from trident.risk.limits import RiskLimits
 from trident.safety.eod_flatten import flatten_now, seconds_until_flatten
 from trident.settings import get_settings
-from trident.strategies.orb import OpeningRangeBreakout
-
-WATCHLIST = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD"]
+from trident.strategies.registry import available_strategies, build_strategy
+from trident.watchlist import WATCHLIST
 
 HEARTBEAT_INTERVAL_SECONDS = 5
 ORDER_POLL_SECONDS = 10
@@ -47,7 +47,7 @@ RECONCILE_SECONDS = 60
 SESSION_START_ISO = ""  # filled in at startup; we list orders/fills after this point
 
 
-async def main() -> None:
+async def main(strategy_name: str = "orb_5m") -> None:
     configure_logging()
     log = get_logger("paper_run")
     settings = get_settings()
@@ -60,7 +60,7 @@ async def main() -> None:
 
     broker = AlpacaBroker()
     store = BarStore()
-    strategy = OpeningRangeBreakout(symbols=WATCHLIST)
+    strategy = build_strategy(strategy_name, WATCHLIST)
     limits = RiskLimits(
         risk_per_trade_pct=settings.risk_per_trade_pct,
         daily_loss_limit_pct=settings.daily_loss_limit_pct,
@@ -72,13 +72,18 @@ async def main() -> None:
     log.info(
         "paper_run_start",
         watchlist=WATCHLIST,
+        strategy=strategy.name,
         starting_equity=str(starting_equity),
         session_start=session_start_iso,
     )
     record(
         "runner_start",
         actor="paper_run",
-        payload={"watchlist": WATCHLIST, "starting_equity": str(starting_equity)},
+        payload={
+            "watchlist": WATCHLIST,
+            "strategy": strategy.name,
+            "starting_equity": str(starting_equity),
+        },
     )
 
     stop_event = asyncio.Event()
@@ -293,4 +298,14 @@ async def _fetch_starting_equity(broker: AlpacaBroker, settings) -> Decimal:  # 
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(
+        description="Submit strategy bracket orders to the Alpaca paper account."
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=available_strategies(),
+        default=get_settings().default_strategy,
+        help="Strategy to run. Default: the configured default_strategy.",
+    )
+    args = parser.parse_args()
+    asyncio.run(main(args.strategy))

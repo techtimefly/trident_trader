@@ -37,8 +37,8 @@ from trident.backtest.walk_forward import walk_forward
 from trident.clock import ET, is_trading_day
 from trident.risk.limits import RiskLimits
 from trident.settings import get_settings
-
-WATCHLIST = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD"]
+from trident.strategies.registry import available_strategies
+from trident.watchlist import WATCHLIST
 
 _RULE = "=" * 105
 _THIN = "-" * 105
@@ -171,6 +171,12 @@ def main() -> int:
         help="Walk-forward window size in trading days. Default: 5.",
     )
     parser.add_argument(
+        "--strategy",
+        choices=available_strategies(),
+        default=settings.default_strategy,
+        help="Strategy to backtest. Default: the configured default_strategy.",
+    )
+    parser.add_argument(
         "--no-persist",
         action="store_true",
         help="Skip writing the run to the database (the dashboard won't see it).",
@@ -221,7 +227,9 @@ def main() -> int:
         start = datetime.combine(d, time(8, 0), tzinfo=ET).astimezone(UTC)
         end = datetime.combine(d, time(20, 0), tzinfo=ET).astimezone(UTC)
         bars = fetch_minute_bars(start, end, WATCHLIST)
-        all_trades.extend(run_day(d, bars, args.equity, limits, WATCHLIST, costs, log))
+        all_trades.extend(
+            run_day(d, bars, args.equity, limits, WATCHLIST, costs, log, strategy_name=args.strategy)
+        )
 
     print_backtest_report(all_trades, costs, args.equity)
     print_walk_forward(all_trades, days, args.window_days)
@@ -231,7 +239,7 @@ def main() -> int:
             days=[datetime(d.year, d.month, d.day, tzinfo=UTC) for d in days],
             equity=args.equity,
             watchlist=WATCHLIST,
-            strategy="orb_5m",
+            strategy=args.strategy,
             trades=all_trades,
             mode="honest",
             costs=costs,

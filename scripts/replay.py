@@ -29,8 +29,8 @@ from trident.clock import ET, is_trading_day
 from trident.data.bars import Bar
 from trident.risk.limits import RiskLimits
 from trident.settings import get_settings
-
-WATCHLIST = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD"]
+from trident.strategies.registry import available_strategies
+from trident.watchlist import WATCHLIST
 
 
 def fetch_minute_bars(start: datetime, end: datetime, symbols: list[str]) -> list[Bar]:
@@ -80,7 +80,9 @@ def trading_days_back(end: date, n: int) -> list[date]:
     return list(reversed(days))
 
 
-def replay_one_day(d: date, equity: Decimal, limits: RiskLimits, log: Any) -> list[SimulatedTrade]:
+def replay_one_day(
+    d: date, equity: Decimal, limits: RiskLimits, log: Any, strategy: str = "orb_5m"
+) -> list[SimulatedTrade]:
     """Fetch one historical day's 1-min bars and replay them idealistically.
 
     Idealistic = no slippage, no fees (``ZERO_COST``). For an honest, costed
@@ -90,7 +92,7 @@ def replay_one_day(d: date, equity: Decimal, limits: RiskLimits, log: Any) -> li
     start = datetime.combine(d, time(8, 0), tzinfo=ET).astimezone(UTC)
     end = datetime.combine(d, time(20, 0), tzinfo=ET).astimezone(UTC)
     bars = fetch_minute_bars(start, end, WATCHLIST)
-    return run_day(d, bars, equity, limits, WATCHLIST, ZERO_COST, log)
+    return run_day(d, bars, equity, limits, WATCHLIST, ZERO_COST, log, strategy_name=strategy)
 
 
 def fmt_money(d: Decimal) -> str:
@@ -135,6 +137,7 @@ def print_report(trades: list[SimulatedTrade]) -> None:
 
 
 def main() -> int:
+    settings = get_settings()
     parser = argparse.ArgumentParser(description="Replay historical bars through the strategy.")
     parser.add_argument(
         "--date",
@@ -154,6 +157,12 @@ def main() -> int:
         help="Account equity to size positions against. Default: 100000.",
     )
     parser.add_argument(
+        "--strategy",
+        choices=available_strategies(),
+        default=settings.default_strategy,
+        help="Strategy to replay. Default: the configured default_strategy.",
+    )
+    parser.add_argument(
         "--no-persist",
         action="store_true",
         help="Skip writing results to the database (dashboard won't see them).",
@@ -162,7 +171,6 @@ def main() -> int:
 
     configure_logging()
     log = get_logger("replay")
-    settings = get_settings()
     if not settings.alpaca_api_key:
         log.error("missing_alpaca_credentials")
         return 1
@@ -189,7 +197,7 @@ def main() -> int:
     log.info("replay_starting", days=[d.isoformat() for d in days])
     all_trades: list[SimulatedTrade] = []
     for d in days:
-        trades = replay_one_day(d, args.equity, limits, log)
+        trades = replay_one_day(d, args.equity, limits, log, args.strategy)
         all_trades.extend(trades)
 
     print_report(all_trades)
@@ -201,7 +209,7 @@ def main() -> int:
             days=[_dt(d.year, d.month, d.day, tzinfo=UTC) for d in days],
             equity=args.equity,
             watchlist=WATCHLIST,
-            strategy="orb_5m",
+            strategy=args.strategy,
             trades=all_trades,
         )
         log.info("replay_persisted", run_id=str(run_id), trades=len(all_trades))

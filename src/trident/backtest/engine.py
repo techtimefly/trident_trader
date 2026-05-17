@@ -17,7 +17,7 @@ from trident.clock import ET
 from trident.data.bars import Bar, BarStore
 from trident.risk.gate import AccountState, MarketState, evaluate
 from trident.risk.limits import RiskLimits
-from trident.strategies.orb import OpeningRangeBreakout
+from trident.strategies.registry import build_strategy
 
 
 def run_day(
@@ -28,20 +28,22 @@ def run_day(
     watchlist: list[str],
     costs: CostModel = ZERO_COST,
     log: Any | None = None,
+    strategy_name: str = "orb_5m",
 ) -> list[SimulatedTrade]:
     """Replay one day's bars through the strategy + gate and simulate fills.
 
     ``bars`` must be the day's 1-min bars across ``watchlist``, ascending by ts.
     With ``costs=ZERO_COST`` the fills are idealistic (replay behaviour); pass a
-    non-zero :class:`CostModel` for an honest backtest. Pure apart from the
-    optional structured ``log``.
+    non-zero :class:`CostModel` for an honest backtest. ``strategy_name`` selects
+    the strategy from the registry (default ORB). Pure apart from the optional
+    structured ``log``.
     """
     if not bars:
         if log is not None:
             log.warning("no_bars_for_day", date=d.isoformat())
         return []
 
-    strategy = OpeningRangeBreakout(symbols=watchlist)
+    strategy = build_strategy(strategy_name, watchlist)
     store = BarStore()
     trades: list[SimulatedTrade] = []
 

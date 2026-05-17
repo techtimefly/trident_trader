@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     max_concurrent_positions: int = 3
     account_equity_override: Decimal | None = None
 
+    # Strategy the runners and backtest select when no --strategy CLI arg is
+    # given. Must be a name registered in trident.strategies.registry.
+    default_strategy: str = "orb_5m"
+
     # Honest-backtest cost model (scripts/backtest.py). Synthetic slippage in
     # basis points (IEX gives no bid/ask); fees default to realistic small values.
     backtest_slippage_bps: Decimal = Field(default=Decimal("2.0"))
@@ -67,6 +71,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "alpaca_data_feed",
+        "default_strategy",
         "log_level",
         "environment",
         "backtest_slippage_bps",

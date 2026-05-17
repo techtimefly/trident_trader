@@ -1,0 +1,46 @@
+{% if rows %}
+<div class="max-h-96 overflow-y-auto">
+<table class="tt mono text-sm">
+    <thead class="sticky top-0 bg-[var(--panel)]">
+        <tr>
+            <th>Strategy</th>
+            <th>Window</th>
+            <th>Trades</th>
+            <th>Win rate</th>
+            <th>Avg R</th>
+            <th>Net P&amp;L</th>
+            <th>Mode</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="font-semibold">
+                {{ r.strategy }}
+                <div class="text-xs dim">{{ r.started_at }}</div>
+            </td>
+            <td class="dim">{{ r.window }} &middot; {{ r.days }}d</td>
+            <td>{{ r.num_trades }} <span class="dim">({{ r.wins }}W/{{ r.losses }}L)</span></td>
+            <td>{{ r.win_rate }}</td>
+            <td class="{{ 'pos' if r.avg_r_positive else 'neg' }}">{{ r.avg_r }}</td>
+            <td class="{{ 'pos' if r.total_pnl_positive else 'neg' }}">{{ r.total_pnl }}</td>
+            <td>
+                {% if r.is_honest %}
+                    <span class="pill pill-amber">honest</span>
+                {% else %}
+                    <span class="pill pill-dim">idealistic</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% elif load_error %}
+<div class="empty">Could not load the strategy comparison.</div>
+{% else %}
+<div class="empty">
+    No runs yet. Run <span class="mono">PYTHONPATH=src python scripts/compare.py --days 30</span>
+    and refresh.
+</div>
+{% endif %}

@@ -389,6 +389,61 @@ def api_replay(request: Request) -> Any:
     )
 
 
+def _comparison_context() -> dict[str, Any]:
+    """Render context for the strategy-comparison panel: the most recent
+    replay/backtest run for each strategy, ranked best-first by net P&L.
+
+    Defensive — outer-ring; a DB hiccup degrades the panel to a placeholder
+    rather than 500-ing the page.
+    """
+    try:
+        with session_scope() as s:
+            runs = list(
+                s.scalars(select(ReplayRun).order_by(ReplayRun.started_at.desc()))
+            )
+            # Runs are newest-first, so the first row seen per strategy is its
+            # most recent run.
+            latest_by_strategy: dict[str, ReplayRun] = {}
+            for run in runs:
+                latest_by_strategy.setdefault(run.strategy, run)
+            ranked = sorted(
+                latest_by_strategy.values(), key=lambda r: r.total_pnl, reverse=True
+            )
+            rows = [
+                {
+                    "strategy": run.strategy,
+                    "is_honest": run.mode == "honest",
+                    "window": (
+                        f"{run.first_day.strftime('%b %d')} → "
+                        f"{run.last_day.strftime('%b %d')}"
+                    ),
+                    "days": run.days,
+                    "num_trades": run.num_trades,
+                    "wins": run.wins,
+                    "losses": run.losses,
+                    "win_rate": (
+                        f"{float(run.wins) / float(run.num_trades) * 100.0:.1f}%"
+                        if run.num_trades
+                        else "—"
+                    ),
+                    "total_pnl": _fmt_money(run.total_pnl),
+                    "total_pnl_positive": run.total_pnl >= 0,
+                    "avg_r": f"{run.avg_r:+.2f}",
+                    "avg_r_positive": run.avg_r >= 0,
+                    "started_at": run.started_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
+                }
+                for run in ranked
+            ]
+    except Exception:
+        return {"rows": [], "load_error": True}
+    return {"rows": rows, "load_error": False}
+
+
+@app.get("/api/compare", response_class=HTMLResponse)
+def api_compare(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_compare.html", _comparison_context())
+
+
 def _fmt_volume(v: int) -> str:
     """Compact share-volume label: 2.4M, 530K, or the raw count."""
     if v >= 1_000_000:

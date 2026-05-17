@@ -16,8 +16,7 @@ from trident.audit.log import configure_logging, get_logger
 from trident.data.bars import Bar
 from trident.data.persistence import persist_bars
 from trident.settings import get_settings
-
-WATCHLIST = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD"]
+from trident.watchlist import WATCHLIST
 
 
 def main() -> int:

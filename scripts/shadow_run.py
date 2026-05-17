@@ -10,6 +10,7 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import signal as os_signal
 from dataclasses import replace
@@ -28,13 +29,13 @@ from trident.persistence.state import kill_switch_engaged, write_heartbeat
 from trident.risk.gate import AccountState, MarketState, evaluate
 from trident.risk.limits import RiskLimits
 from trident.settings import get_settings
-from trident.strategies.orb import OpeningRangeBreakout
+from trident.strategies.registry import available_strategies, build_strategy
+from trident.watchlist import WATCHLIST
 
-WATCHLIST = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD"]
 HEARTBEAT_INTERVAL_SECONDS = 5
 
 
-async def main() -> None:
+async def main(strategy_name: str = "orb_5m") -> None:
     configure_logging()
     log = get_logger("shadow")
     settings = get_settings()
@@ -43,7 +44,7 @@ async def main() -> None:
         return
 
     store = BarStore()
-    strategy = OpeningRangeBreakout(symbols=WATCHLIST)
+    strategy = build_strategy(strategy_name, WATCHLIST)
     limits = RiskLimits(
         risk_per_trade_pct=settings.risk_per_trade_pct,
         daily_loss_limit_pct=settings.daily_loss_limit_pct,
@@ -51,7 +52,12 @@ async def main() -> None:
     )
 
     starting_equity = await _fetch_starting_equity(settings)
-    log.info("shadow_run_start", watchlist=WATCHLIST, starting_equity=str(starting_equity))
+    log.info(
+        "shadow_run_start",
+        watchlist=WATCHLIST,
+        strategy=strategy.name,
+        starting_equity=str(starting_equity),
+    )
 
     async def on_bar(bar: Bar) -> None:
         try:
@@ -196,5 +202,15 @@ async def _fetch_starting_equity(settings) -> Decimal:  # type: ignore[no-untype
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Run a strategy on live data without submitting orders (shadow mode)."
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=available_strategies(),
+        default=get_settings().default_strategy,
+        help="Strategy to run. Default: the configured default_strategy.",
+    )
+    args = parser.parse_args()
     _ = is_market_open()
-    asyncio.run(main())
+    asyncio.run(main(args.strategy))

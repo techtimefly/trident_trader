@@ -254,3 +254,48 @@ class ScreenResultRow(Base):
     change_pct: Mapped[Decimal] = mapped_column(Numeric(12, 4))
 
     run: Mapped[ScreenRun] = relationship(back_populates="results")
+
+
+class SuggestionRun(Base):
+    """One AI stock-suggestion run — the advisory pre-market precheck.
+
+    Claude reviews the latest screen and suggests stocks to watch. This is
+    outer-ring and advisory only: a row here is something the user reads, never
+    a trading instruction. ``ok`` is False for a degraded run (no API key,
+    nothing to review, an API error) — ``notice`` then carries the explanation
+    and there are no child ``suggestions`` rows.
+    """
+
+    __tablename__ = "suggestion_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ok: Mapped[bool] = mapped_column()  # False = degraded run (see notice)
+    model: Mapped[str] = mapped_column(String(64))  # Anthropic model id, or ""
+    notice: Mapped[str] = mapped_column(String(512))  # explanation when not ok
+    screen_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("screen_runs.id"), nullable=True
+    )
+
+    suggestions: Mapped[list[SuggestionRow]] = relationship(back_populates="run")
+
+
+class SuggestionRow(Base):
+    """One stock the AI suggested watching, with its rationale.
+
+    ``confidence`` is the model's own low/medium/high label — a hint for the
+    reader, never a number fed into any calculation.
+    """
+
+    __tablename__ = "suggestion_rows"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("suggestion_runs.id"), index=True
+    )
+    rank: Mapped[int] = mapped_column()  # 1-based position, best-first
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    rationale: Mapped[str] = mapped_column(String(2048))
+    confidence: Mapped[str] = mapped_column(String(16))  # low | medium | high
+
+    run: Mapped[SuggestionRun] = relationship(back_populates="suggestions")

@@ -34,6 +34,7 @@ from trident.persistence import managed_position
 from trident.persistence.daily_plan import resolve_today
 from trident.persistence.models import Signal as SignalRow
 from trident.persistence.session import session_scope
+from trident.persistence.signal_recovery import mark_stale_unsubmitted_signals
 from trident.persistence.state import kill_switch_engaged, write_heartbeat
 from trident.portfolio.manage import apply_management_actions
 from trident.portfolio.tracking import reconcile_positions, sync_orders
@@ -74,6 +75,14 @@ async def main(strategy_name: str = "orb_5m") -> None:
             log.info("session_state_recovered", bars=recovered)
     except Exception:
         log.exception("session_state_recovery_failed")
+    # Relabel any signal approved last session but never submitted (a crash
+    # between gate and submit). We do not resubmit — the price has moved.
+    try:
+        stale = mark_stale_unsubmitted_signals(now_et().date())
+        if stale:
+            log.info("stale_signals_marked", count=stale)
+    except Exception:
+        log.exception("stale_signal_recovery_failed")
     limits = RiskLimits(
         risk_per_trade_pct=settings.risk_per_trade_pct,
         daily_loss_limit_pct=settings.daily_loss_limit_pct,
@@ -276,7 +285,7 @@ async def main(strategy_name: str = "orb_5m") -> None:
                 log.exception("heartbeat_failed")
             try:
                 await asyncio.wait_for(stop_event.wait(), HEARTBEAT_INTERVAL_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
     async def order_poll_loop() -> None:
@@ -289,7 +298,7 @@ async def main(strategy_name: str = "orb_5m") -> None:
                 log.exception("order_sync_failed")
             try:
                 await asyncio.wait_for(stop_event.wait(), ORDER_POLL_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
     async def reconcile_loop() -> None:
@@ -302,7 +311,7 @@ async def main(strategy_name: str = "orb_5m") -> None:
                 log.exception("reconciliation_failed")
             try:
                 await asyncio.wait_for(stop_event.wait(), RECONCILE_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
     async def eod_flatten_loop() -> None:
@@ -322,7 +331,7 @@ async def main(strategy_name: str = "orb_5m") -> None:
                 continue
             try:
                 await asyncio.wait_for(stop_event.wait(), min(secs, 60))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             else:
                 return
@@ -343,7 +352,7 @@ async def main(strategy_name: str = "orb_5m") -> None:
 async def _sleep_with_stop(stop_event: asyncio.Event, seconds: float) -> None:
     try:
         await asyncio.wait_for(stop_event.wait(), seconds)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
 
 

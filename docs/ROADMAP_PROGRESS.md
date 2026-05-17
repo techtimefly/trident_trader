@@ -34,7 +34,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 - [x] 4.4 Add the per-trade P&L dashboard panel (`_pnl.html`).
 - [x] 4.5 Add `src/trident/data/bars_backfill.py` — BarStore DB-backfill helper + tests.
 - [x] 4.6 Add startup BarStore backfill + strategy-state rebuild to the runners.
-- [ ] 4.7 Handle approved-but-unsubmitted signals on startup (mark stale + log).
+- [x] 4.7 Handle approved-but-unsubmitted signals on startup (mark stale + log).
 
 ## Phase 5 — Live trading sketch (docs only)
 - [ ] 5.1 Write `docs/LIVE_TRADING.md` — the gated real-money design note + ramp checklist. No code; do NOT create `live_run.py`.

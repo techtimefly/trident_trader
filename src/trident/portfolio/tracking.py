@@ -7,23 +7,30 @@ becomes valuable in v0.3+ once we want second-by-second fill events.
 
 What this module does:
   - For every order Alpaca knows about today, update our local `orders` row.
-  - When the parent entry of a bracket fills, insert a row into `positions`.
-  - When the position closes (TP/SL or manual flatten), remove the row.
+  - Record a bracket's child legs (TP/SL) linked to their parent entry order.
+  - Reconcile the local `positions` table against the broker.
+  - Reconcile the actively-managed `managed_positions` table — drop rows whose
+    position the broker no longer holds, and seed a broker-only position's
+    stop/target from the managed row's live values.
 
 Audit events:
-  - order_state_changed — on any state transition (pending → submitted → filled etc).
+  - order_state_changed — on any state transition (pending → submitted → filled).
   - position_opened / position_closed — derived from the order state changes.
+  - managed_position_closed — a managed position the broker no longer holds.
 """
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from trident.audit.log import get_logger, record
 from trident.execution.broker import Broker, OrderSnapshot
+from trident.persistence.models import ManagedPosition as ManagedPositionRow
 from trident.persistence.models import Order as OrderRow
 from trident.persistence.models import Position as PositionRow
 from trident.persistence.session import session_scope
@@ -31,18 +38,37 @@ from trident.persistence.session import session_scope
 log = get_logger("portfolio.tracking")
 
 
+def child_leg_client_id(parent_client_order_id: str, leg_broker_id: str) -> str:
+    """Synthetic, unique client_order_id for a bracket child leg.
+
+    Child legs carry no client_order_id of ours, but the `orders` table's
+    client_order_id is unique and not-null — so a leg row gets a deterministic
+    synthetic id derived from its parent and its own broker id.
+    """
+    return f"{parent_client_order_id}::leg::{leg_broker_id}"
+
+
+def managed_symbols_to_drop(managed: Iterable[str], broker: Iterable[str]) -> list[str]:
+    """Managed-position symbols the broker no longer holds — i.e. closed."""
+    held = set(broker)
+    return sorted(s for s in set(managed) if s not in held)
+
+
 def sync_orders(broker: Broker, since_iso: str) -> int:
     """Pull every order touched since `since_iso` and reconcile with the local DB.
 
-    Returns the number of orders updated (created or state-changed).
+    Parent orders are tracked by our client_order_id; each parent's child legs
+    (TP/SL) are recorded too, linked back via `parent_order_id`. Returns the
+    number of orders created or state-changed.
     """
     snaps = broker.list_orders_since(since_iso)
+    by_broker_id = {sn.broker_order_id: sn for sn in snaps if sn.broker_order_id}
     changed = 0
 
     with session_scope() as s:
         for snap in snaps:
             if not snap.client_order_id:
-                continue  # Bracket-order children inherit the parent id; we only track our originals.
+                continue  # A child leg — recorded below from its parent's `legs`.
 
             row = _get_by_client_id(s, snap.client_order_id)
             if row is None:
@@ -60,9 +86,7 @@ def sync_orders(broker: Broker, since_iso: str) -> int:
                 s.add(row)
                 _audit_state_change(snap, old_state=None)
                 changed += 1
-                continue
-
-            if row.state != snap.status:
+            elif row.state != snap.status:
                 old = row.state
                 row.state = snap.status
                 row.broker_order_id = snap.broker_order_id or row.broker_order_id
@@ -73,22 +97,62 @@ def sync_orders(broker: Broker, since_iso: str) -> int:
                 _audit_state_change(snap, old_state=old)
                 changed += 1
 
+            changed += _record_legs(s, row, snap, by_broker_id)
+
     return changed
+
+
+def _record_legs(
+    s: Session,
+    parent_row: OrderRow,
+    parent_snap: OrderSnapshot,
+    by_broker_id: dict[str, OrderSnapshot],
+) -> int:
+    """Record any of `parent_snap`'s child legs not yet in the DB. Returns the
+    count newly recorded. A leg is recorded only when its own snapshot is in the
+    batch, so symbol/side/qty/state are accurate."""
+    recorded = 0
+    for leg_broker_id in parent_snap.legs:
+        leg_snap = by_broker_id.get(leg_broker_id)
+        if leg_snap is None:
+            continue
+        leg_cid = child_leg_client_id(parent_snap.client_order_id, leg_broker_id)
+        if _get_by_client_id(s, leg_cid) is not None:
+            continue
+        s.add(
+            OrderRow(
+                id=uuid.uuid4(),
+                client_order_id=leg_cid,
+                broker_order_id=leg_broker_id,
+                parent_order_id=parent_row.id,
+                symbol=leg_snap.symbol,
+                side=leg_snap.side,
+                qty=leg_snap.qty,
+                order_type="bracket_leg",
+                state=leg_snap.status,
+                raw={"snapshot": _snap_to_dict(leg_snap)},
+            )
+        )
+        recorded += 1
+    return recorded
 
 
 def reconcile_positions(broker: Broker) -> dict[str, object]:
     """Compare local positions vs broker. Mutates local DB to match broker.
 
-    Drift is logged and audited but the broker is treated as authoritative
-    (the broker is the source of truth for what we actually own).
+    Drift is logged and audited but the broker is treated as authoritative.
+    Also reconciles `managed_positions`: a managed position the broker no longer
+    holds is dropped, and a broker-only position's stop/target is seeded from
+    the managed row's live values rather than left at zero.
     """
     broker_pos = {p.symbol: p for p in broker.list_positions()}
 
     drift: list[dict[str, object]] = []
     with session_scope() as s:
+        managed = {m.symbol: m for m in s.scalars(select(ManagedPositionRow))}
         local = {p.symbol: p for p in s.scalars(select(PositionRow))}
 
-        # Remove or update existing local rows
+        # Remove or update existing local rows.
         for symbol, local_pos in list(local.items()):
             if symbol not in broker_pos:
                 drift.append({"symbol": symbol, "kind": "local_only", "local_qty": local_pos.qty})
@@ -112,10 +176,12 @@ def reconcile_positions(broker: Broker) -> dict[str, object]:
                 local_pos.qty = bp.qty
                 local_pos.avg_entry = bp.avg_entry_price
 
-        # Add positions present in broker but missing locally
+        # Add positions present in broker but missing locally. Seed stop/target
+        # from the managed row's live values when we have one.
         for symbol, bp in broker_pos.items():
             if symbol in local:
                 continue
+            mp = managed.get(symbol)
             drift.append({"symbol": symbol, "kind": "broker_only", "broker_qty": bp.qty})
             s.add(
                 PositionRow(
@@ -123,8 +189,8 @@ def reconcile_positions(broker: Broker) -> dict[str, object]:
                     symbol=symbol,
                     qty=bp.qty,
                     avg_entry=bp.avg_entry_price,
-                    stop_price=Decimal("0"),  # unknown without bracket child lookup; fill later
-                    target_price=Decimal("0"),
+                    stop_price=mp.stop_price if mp is not None else Decimal("0"),
+                    target_price=mp.target_price if mp is not None else Decimal("0"),
                     opened_at=datetime.now(UTC),
                 )
             )
@@ -132,6 +198,16 @@ def reconcile_positions(broker: Broker) -> dict[str, object]:
                 "position_opened",
                 actor="reconciler",
                 payload={"symbol": symbol, "qty": bp.qty},
+            )
+
+        # Reconcile managed_positions: drop any the broker no longer holds.
+        for symbol in managed_symbols_to_drop(managed.keys(), broker_pos.keys()):
+            s.delete(managed[symbol])
+            drift.append({"symbol": symbol, "kind": "managed_closed"})
+            record(
+                "managed_position_closed",
+                actor="reconciler",
+                payload={"symbol": symbol},
             )
 
     result: dict[str, object] = {
@@ -144,9 +220,10 @@ def reconcile_positions(broker: Broker) -> dict[str, object]:
     return result
 
 
-def _get_by_client_id(session, client_order_id: str) -> OrderRow | None:  # type: ignore[no-untyped-def]
+def _get_by_client_id(session: Session, client_order_id: str) -> OrderRow | None:
     stmt = select(OrderRow).where(OrderRow.client_order_id == client_order_id)
-    return session.scalars(stmt).first()
+    row: OrderRow | None = session.scalars(stmt).first()
+    return row
 
 
 def _audit_state_change(snap: OrderSnapshot, old_state: str | None) -> None:
@@ -178,6 +255,7 @@ def _snap_to_dict(snap: OrderSnapshot) -> dict[str, object]:
         "order_class": snap.order_class,
         "submitted_at": snap.submitted_at,
         "filled_at": snap.filled_at,
+        "legs": list(snap.legs),
     }
 
 

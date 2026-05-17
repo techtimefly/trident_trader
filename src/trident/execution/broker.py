@@ -29,6 +29,9 @@ class OrderSnapshot:
     order_class: str
     submitted_at: str
     filled_at: str | None
+    # Broker order ids of this order's child legs (a bracket parent's TP/SL).
+    # Empty for a child leg or a standalone order.
+    legs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

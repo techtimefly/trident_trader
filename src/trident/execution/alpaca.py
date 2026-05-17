@@ -331,4 +331,5 @@ def _snapshot(o: Any) -> OrderSnapshot:
         order_class=str(o.order_class).split(".")[-1].lower() if o.order_class else "",
         submitted_at=str(o.submitted_at) if o.submitted_at else "",
         filled_at=str(o.filled_at) if o.filled_at else None,
+        legs=tuple(str(leg.id) for leg in (getattr(o, "legs", None) or [])),
     )

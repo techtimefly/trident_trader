@@ -1,0 +1,52 @@
+{% if load_error %}
+<div class="empty">Could not load AI suggestions. Check the database connection.</div>
+{% elif run %}
+<div class="px-5 py-4 border-b border-[var(--border)]">
+    <div class="flex flex-wrap items-center gap-2">
+        <span class="pill pill-amber">advisory only</span>
+        <span class="text-xs dim">
+            Suggestions to watch &mdash; not trading instructions. You decide.
+        </span>
+    </div>
+    <div class="text-xs dim mt-2">
+        {% if run.model %}<span class="pill pill-dim">model</span> {{ run.model }} &middot; {% endif %}
+        run {{ run.started_at }}
+    </div>
+</div>
+
+{% if rows %}
+<div class="max-h-96 overflow-y-auto">
+<table class="tt text-sm">
+    <thead class="sticky top-0 bg-[var(--panel)]">
+        <tr>
+            <th>#</th>
+            <th>Symbol</th>
+            <th>Confidence</th>
+            <th>Rationale</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="dim mono">{{ r.rank }}</td>
+            <td class="font-semibold mono">{{ r.symbol }}</td>
+            <td>
+                <span class="pill {{ r.confidence_pill }}">{{ r.confidence }}</span>
+            </td>
+            <td class="dim">{{ r.rationale }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="empty">{{ run.notice or "The AI suggested no symbols to watch." }}</div>
+{% endif %}
+
+{% else %}
+<div class="empty">
+    No AI suggestion run yet. Run
+    <span class="mono">PYTHONPATH=src python scripts/suggest.py</span>
+    (needs a screen and an <span class="mono">ANTHROPIC_API_KEY</span>) and refresh.
+</div>
+{% endif %}

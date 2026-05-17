@@ -45,6 +45,7 @@ from trident.persistence.state import (
     set_kill_switch,
 )
 from trident.screener.persistence import get_latest_screen
+from trident.suggest.persistence import get_latest_suggestions
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -436,3 +437,50 @@ def _screen_context() -> dict[str, Any]:
 @app.get("/api/screen", response_class=HTMLResponse)
 def api_screen(request: Request) -> Any:
     return templates.TemplateResponse(request, "_screen.html", _screen_context())
+
+
+# Confidence label -> pill style for the AI-suggestions panel.
+_CONFIDENCE_PILLS = {
+    "high": "pill-green",
+    "medium": "pill-amber",
+    "low": "pill-dim",
+}
+
+
+def _suggest_context() -> dict[str, Any]:
+    """Render context for the AI-suggestions panel: the latest run + its rows.
+
+    Defensive — the AI suggestion feature is outer-ring and advisory only; a
+    DB hiccup degrades the panel to a placeholder rather than 500-ing the page.
+    A not-ok run (no API key, nothing to review, an API error) still renders:
+    the run's ``notice`` explains why there are no suggestions.
+    """
+    try:
+        latest = get_latest_suggestions()
+    except Exception:
+        return {"run": None, "rows": [], "load_error": True}
+    if latest is None:
+        return {"run": None, "rows": [], "load_error": False}
+
+    run_view = {
+        "started_at": latest.started_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
+        "model": latest.model,
+        "ok": latest.ok,
+        "notice": latest.notice,
+    }
+    rows = [
+        {
+            "rank": s.rank,
+            "symbol": s.symbol,
+            "confidence": s.confidence,
+            "confidence_pill": _CONFIDENCE_PILLS.get(s.confidence, "pill-dim"),
+            "rationale": s.rationale,
+        }
+        for s in latest.suggestions
+    ]
+    return {"run": run_view, "rows": rows, "load_error": False}
+
+
+@app.get("/api/suggest", response_class=HTMLResponse)
+def api_suggest(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_suggest.html", _suggest_context())

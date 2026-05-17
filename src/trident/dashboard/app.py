@@ -32,6 +32,7 @@ from trident.persistence.daily_plan import (
 )
 from trident.persistence.models import (
     AuditEvent,
+    LiveTrade,
     ReplayRun,
     ReplayTrade,
     Signal,
@@ -717,6 +718,80 @@ def _do_manage_action(action: str, form: dict[str, list[str]]) -> tuple[str, boo
         return f"Cancel submitted for order {order_id}.", False
 
     return f"Unknown action {action!r}.", True
+
+
+def _fmt_duration(seconds: int) -> str:
+    """Compact holding-period label: '1h 30m' or '12m'."""
+    minutes = seconds // 60
+    if minutes >= 60:
+        return f"{minutes // 60}h {minutes % 60}m"
+    return f"{minutes}m"
+
+
+def _pnl_context() -> dict[str, Any]:
+    """Context for the per-trade P&L panel: recent closed live trades + a
+    summary. Defensive — outer-ring; a DB hiccup degrades to a placeholder.
+    """
+    try:
+        with session_scope() as s:
+            trades = list(
+                s.scalars(
+                    select(LiveTrade).order_by(LiveTrade.entry_ts.desc()).limit(50)
+                )
+            )
+            rows = []
+            total_net = total_gross = total_fees = Decimal("0")
+            wins = losses = washes = 0
+            for t in trades:
+                total_net += t.net_pnl
+                total_gross += t.gross_pnl
+                total_fees += t.fees
+                if t.net_pnl > 0:
+                    wins += 1
+                elif t.net_pnl < 0:
+                    losses += 1
+                if t.wash_sale:
+                    washes += 1
+                rows.append(
+                    {
+                        "date": t.entry_ts.astimezone(ET).strftime("%Y-%m-%d"),
+                        "time": t.entry_ts.astimezone(ET).strftime("%H:%M"),
+                        "symbol": t.symbol,
+                        "side": t.side,
+                        "qty": t.qty,
+                        "entry": _fmt_money(t.entry_price),
+                        "exit": _fmt_money(t.exit_price),
+                        "net": _fmt_money(t.net_pnl),
+                        "net_positive": t.net_pnl >= 0,
+                        "r": f"{t.r_multiple:+.2f}" if t.r_multiple is not None else "—",
+                        "hold": _fmt_duration(t.holding_period_seconds),
+                        "wash": t.wash_sale,
+                    }
+                )
+            n = len(trades)
+            summary = (
+                {
+                    "count": n,
+                    "wins": wins,
+                    "losses": losses,
+                    "win_rate": f"{wins / n * 100:.1f}%" if n else "—",
+                    "total_net": _fmt_money(total_net),
+                    "total_net_positive": total_net >= 0,
+                    "total_gross": _fmt_money(total_gross),
+                    "total_fees": _fmt_money(total_fees),
+                    "washes": washes,
+                }
+                if n
+                else None
+            )
+    except Exception:
+        return {"rows": [], "summary": None, "load_error": True}
+    return {"rows": rows, "summary": summary, "load_error": False}
+
+
+@app.get("/api/pnl", response_class=HTMLResponse)
+def api_pnl(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_pnl.html", _pnl_context())
 
 
 @app.get("/api/manage", response_class=HTMLResponse)

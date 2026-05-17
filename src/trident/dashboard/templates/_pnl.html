@@ -1,0 +1,75 @@
+{% if load_error %}
+<div class="empty">Could not load trade P&amp;L. Check the database connection.</div>
+{% elif not rows %}
+<div class="empty">
+    No closed live trades yet. Round-trips appear here as positions close.
+</div>
+{% else %}
+<div class="px-5 py-4 border-b border-[var(--border)]">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Trades</div>
+            <div class="mono text-xl mt-1">{{ summary.count }}</div>
+            <div class="text-xs dim mt-1">{{ summary.wins }}W / {{ summary.losses }}L</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Win rate</div>
+            <div class="mono text-xl mt-1">{{ summary.win_rate }}</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Net P&amp;L</div>
+            <div class="mono text-xl mt-1 {{ 'pos' if summary.total_net_positive else 'neg' }}">
+                {{ summary.total_net }}
+            </div>
+            <div class="text-xs dim mt-1">gross {{ summary.total_gross }} &middot; fees {{ summary.total_fees }}</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Wash sales</div>
+            <div class="mono text-xl mt-1">{{ summary.washes }}</div>
+        </div>
+        <div>
+            <div class="text-xs dim uppercase tracking-widest">Fees</div>
+            <div class="mono text-xl mt-1">{{ summary.total_fees }}</div>
+            <div class="text-xs dim mt-1">live fees not tracked &mdash; 0</div>
+        </div>
+    </div>
+</div>
+
+<div class="max-h-96 overflow-y-auto">
+<table class="tt mono text-sm">
+    <thead class="sticky top-0 bg-[var(--panel)]">
+        <tr>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Sym</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>Hold</th>
+            <th>Net P&amp;L</th>
+            <th>R</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="dim">{{ r.date }}</td>
+            <td class="dim">{{ r.time }}</td>
+            <td class="font-semibold">{{ r.symbol }}</td>
+            <td>
+                {{ r.side }}
+                {% if r.wash %}<span class="pill pill-amber">wash</span>{% endif %}
+            </td>
+            <td>{{ r.qty }}</td>
+            <td>{{ r.entry }}</td>
+            <td>{{ r.exit }}</td>
+            <td class="dim">{{ r.hold }}</td>
+            <td class="{{ 'pos' if r.net_positive else 'neg' }}">{{ r.net }}</td>
+            <td class="{{ 'pos' if r.net_positive else 'neg' }}">{{ r.r }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}

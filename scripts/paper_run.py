@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import signal as os_signal
-from datetime import UTC, datetime, time as dtime
+from dataclasses import replace
+from datetime import UTC, datetime
+from datetime import time as dtime
 from decimal import Decimal
 
 from trident.audit.log import configure_logging, get_logger, record
@@ -26,6 +28,7 @@ from trident.data.feed import AlpacaBarFeed
 from trident.data.persistence import persist_bar
 from trident.execution.alpaca import AlpacaBroker
 from trident.execution.orders import build_bracket
+from trident.persistence.daily_plan import resolve_today
 from trident.persistence.models import Signal as SignalRow
 from trident.persistence.session import session_scope
 from trident.persistence.state import kill_switch_engaged, write_heartbeat
@@ -99,8 +102,19 @@ async def main() -> None:
             return
 
         et = now_et()
+        # Daily Plan: read today's caps + observed facts. A DB failure here is
+        # reject-on-doubt — skip the signal rather than trade outside the plan.
+        try:
+            plan_ctx = resolve_today(et.date())
+        except Exception:
+            log.exception("daily_plan_fact_query_failed", symbol=sig.symbol)
+            return
+        per_bar_limits = replace(
+            limits,
+            daily_budget_pct=plan_ctx.budget_pct,
+            max_day_trades=plan_ctx.max_day_trades,
+        )
         broker_positions = {p.symbol: p.qty for p in broker.list_positions()}
-        account_view = broker.list_positions  # noqa: F841 — kept for clarity
         # Equity for sizing is the paper account's current equity.
         equity = await _fetch_starting_equity(broker, settings)
         account = AccountState(
@@ -108,9 +122,11 @@ async def main() -> None:
             starting_equity_today=starting_equity,
             buying_power=equity * Decimal("2"),
             open_positions=broker_positions,
+            notional_deployed_today=plan_ctx.notional_deployed_today,
+            day_trades_in_window=plan_ctx.day_trades_in_window,
         )
         market = MarketState(kill_switch_active=kill_switch_engaged())
-        decision = evaluate(sig, account, market, limits, dtime(et.hour, et.minute))
+        decision = evaluate(sig, account, market, per_bar_limits, dtime(et.hour, et.minute))
 
         signal_id = None
         with session_scope() as s:

@@ -134,3 +134,29 @@ def day_trades_in_window(day: date, window: int = 5) -> int:
             )
         ).scalar_one()
     return int(count)
+
+
+@dataclass(frozen=True)
+class PlanContext:
+    """Today's plan resolved against the DB — the caps plus the observed facts
+    the risk gate needs. All-empty (no caps) when no plan row exists."""
+
+    budget_pct: Decimal | None
+    max_day_trades: int | None
+    notional_deployed_today: Decimal
+    day_trades_in_window: int
+
+
+def resolve_today(day: date) -> PlanContext:
+    """Read ``day``'s plan and the observed facts the gate consumes.
+
+    When no plan row exists, returns an all-empty context (no caps). The
+    observed-fact queries run only for caps that are actually set. Propagates
+    any DB error so the caller (the runner) can apply reject-on-doubt.
+    """
+    plan = get_for_day(day)
+    if plan is None:
+        return PlanContext(None, None, Decimal("0"), 0)
+    deployed = notional_deployed_today(day) if plan.budget_pct is not None else Decimal("0")
+    trades = day_trades_in_window(day) if plan.max_day_trades is not None else 0
+    return PlanContext(plan.budget_pct, plan.max_day_trades, deployed, trades)

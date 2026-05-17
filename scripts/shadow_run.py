@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import signal as os_signal
+from dataclasses import replace
 from datetime import time as dtime
 from decimal import Decimal
 
@@ -20,6 +21,7 @@ from trident.clock import is_market_open, now_et
 from trident.data.bars import Bar, BarStore
 from trident.data.feed import AlpacaBarFeed
 from trident.data.persistence import persist_bar
+from trident.persistence.daily_plan import resolve_today
 from trident.persistence.models import Signal as SignalRow
 from trident.persistence.session import session_scope
 from trident.persistence.state import kill_switch_engaged, write_heartbeat
@@ -62,14 +64,28 @@ async def main() -> None:
             return
 
         et = now_et()
+        # Daily Plan: read today's caps + observed facts. A DB failure here is
+        # reject-on-doubt — skip the signal rather than evaluate outside the plan.
+        try:
+            plan_ctx = resolve_today(et.date())
+        except Exception:
+            log.exception("daily_plan_fact_query_failed", symbol=sig.symbol)
+            return
+        per_bar_limits = replace(
+            limits,
+            daily_budget_pct=plan_ctx.budget_pct,
+            max_day_trades=plan_ctx.max_day_trades,
+        )
         account = AccountState(
             equity=starting_equity,
             starting_equity_today=starting_equity,
             buying_power=starting_equity * Decimal("2"),
             open_positions={},
+            notional_deployed_today=plan_ctx.notional_deployed_today,
+            day_trades_in_window=plan_ctx.day_trades_in_window,
         )
         market = MarketState(kill_switch_active=kill_switch_engaged())
-        decision = evaluate(sig, account, market, limits, dtime(et.hour, et.minute))
+        decision = evaluate(sig, account, market, per_bar_limits, dtime(et.hour, et.minute))
 
         # Persist signal + decision together. The audit log entry is the canonical record;
         # the signals row is for fast queries from the dashboard.

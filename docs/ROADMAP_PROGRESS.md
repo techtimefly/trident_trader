@@ -28,7 +28,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 - [x] 3.8 Update reconciliation to track bracket child legs and the live stop/target.
 
 ## Phase 4 — Accounting & resilience
-- [ ] 4.1 Add the `LiveTrade` round-trip table + migration `0010`.
+- [x] 4.1 Add the `LiveTrade` round-trip table + migration `0010`.
 - [ ] 4.2 Add `src/trident/accounting/round_trip.py` — pure round-trip + wash-sale computation + tests.
 - [ ] 4.3 Wire `LiveTrade` creation into `portfolio/tracking.py` position-close (inner-ring — tests same commit).
 - [ ] 4.4 Add the per-trade P&L dashboard panel (`_pnl.html`).

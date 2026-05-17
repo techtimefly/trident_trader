@@ -232,6 +232,41 @@ class ReplayTrade(Base):
     exit_fee: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
 
 
+class LiveTrade(Base):
+    """One closed live round-trip — an entry matched to its exit, with realized
+    P&L. The live counterpart of :class:`ReplayTrade` (which is simulation only).
+
+    ``wash_sale`` flags a realized loss followed by a re-entry in the same
+    symbol within 30 days — an informational tax marker, never fed into any
+    trading decision.
+    """
+
+    __tablename__ = "live_trades"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    side: Mapped[str] = mapped_column(String(8))  # long | short
+    strategy: Mapped[str] = mapped_column(String(64), index=True)
+    qty: Mapped[int] = mapped_column()
+    entry_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    entry_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    exit_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    exit_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    gross_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6))  # before fees
+    fees: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    net_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6))  # gross minus fees
+    r_multiple: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    holding_period_seconds: Mapped[int] = mapped_column(BigInteger)
+    wash_sale: Mapped[bool] = mapped_column(default=False)
+    entry_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("orders.id"), nullable=True
+    )
+    exit_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("orders.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class DailyPlan(Base):
     """One row per trading day — the user's per-day guardrails (capital budget,
     day-trade cap). A missing row, or a NULL column, means that cap is not set.

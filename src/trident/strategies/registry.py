@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 from trident.strategies.base import Strategy
 from trident.strategies.orb import OpeningRangeBreakout
+from trident.strategies.vwap_reversion import VWAPReversion
 
 # A builder takes the watchlist symbols and returns a fresh Strategy instance.
 StrategyBuilder = Callable[[list[str]], Strategy]
@@ -53,3 +54,4 @@ def build_strategy(name: str, symbols: list[str]) -> Strategy:
 # Built-in strategies. Keyed by the strategy's own ``name`` so the registry key
 # can never drift from what the strategy reports about itself.
 register(OpeningRangeBreakout.name, lambda symbols: OpeningRangeBreakout(symbols=symbols))
+register(VWAPReversion.name, lambda symbols: VWAPReversion(symbols=symbols))

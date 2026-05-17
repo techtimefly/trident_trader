@@ -118,3 +118,57 @@ def build_bracket(signal: Signal, qty: int, signal_id: uuid.UUID | str) -> Brack
         time_in_force="day",
         signal_id=str(signal_id),
     )
+
+
+# Why a management order exists. Part of its idempotency key, so the set is
+# closed — an unknown reason is a bug, not a free-form label.
+MANAGEMENT_REASONS = frozenset({"scale_in", "scale_out", "exit", "manual"})
+
+
+def management_client_order_id(signal_id: uuid.UUID | str, reason: str, seq: int) -> str:
+    """Deterministic idempotency key for a management order on a position.
+
+    Distinct from the bracket key (``trident-{signal_id}``) by the reason+seq
+    suffix, so a scale-in, a scale-out and the original entry never collide.
+    ``seq`` disambiguates repeated actions of the same kind on one position.
+    """
+    return f"trident-{signal_id}-{reason}-{seq}"
+
+
+def build_management_order(
+    *,
+    signal_id: uuid.UUID | str,
+    symbol: str,
+    side: str,
+    qty: int,
+    reason: str,
+    seq: int,
+    limit_price: Decimal | None = None,
+) -> OrderIntent:
+    """Translate a position-management decision into a single-leg OrderIntent.
+
+    A None ``limit_price`` builds a market order; a value builds a limit order
+    rounded to the cent. The client_order_id is deterministic in
+    (signal_id, reason, seq) so resubmitting the same management action cannot
+    double up on Alpaca's side.
+    """
+    if qty <= 0:
+        raise ValueError(f"qty must be > 0, got {qty}")
+    if side not in {"buy", "sell"}:
+        raise ValueError(f"side must be 'buy' or 'sell', got {side!r}")
+    if reason not in MANAGEMENT_REASONS:
+        raise ValueError(f"unknown management reason {reason!r}")
+    if seq < 1:
+        raise ValueError(f"seq must be >= 1, got {seq}")
+
+    order_type = "limit" if limit_price is not None else "market"
+    return OrderIntent(
+        client_order_id=management_client_order_id(signal_id, reason, seq),
+        symbol=symbol,
+        side=side,
+        qty=qty,
+        order_type=order_type,
+        limit_price=_round_price(limit_price) if limit_price is not None else None,
+        time_in_force="day",
+        reason=reason,
+    )

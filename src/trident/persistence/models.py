@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -183,3 +184,17 @@ class ReplayTrade(Base):
     exit_price: Mapped[Decimal] = mapped_column(Numeric(18, 6))
     pnl: Mapped[Decimal] = mapped_column(Numeric(18, 6))
     r_multiple: Mapped[Decimal] = mapped_column(Numeric(8, 4))
+
+
+class DailyPlan(Base):
+    """One row per trading day — the user's per-day guardrails (capital budget,
+    day-trade cap). A missing row, or a NULL column, means that cap is not set.
+    """
+
+    __tablename__ = "daily_plans"
+
+    trading_day: Mapped[date] = mapped_column(Date, primary_key=True)
+    budget_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    max_day_trades: Mapped[int | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

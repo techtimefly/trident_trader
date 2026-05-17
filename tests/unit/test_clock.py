@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+import pytest
+
 from trident.clock import (
     ET,
     current_session,
@@ -10,6 +12,7 @@ from trident.clock import (
     minutes_since_open,
     minutes_until_close,
     next_trading_day,
+    nth_business_day_back,
     session_for,
 )
 
@@ -89,3 +92,32 @@ def test_current_session_uses_provided_time() -> None:
     sess = current_session(at)
     assert sess is not None
     assert sess.trading_day == date(2026, 5, 14)
+
+
+def test_nth_business_day_back_n1_on_trading_day() -> None:
+    assert nth_business_day_back(date(2026, 5, 14), 1) == date(2026, 5, 14)
+
+
+def test_nth_business_day_back_5_from_friday() -> None:
+    # Fri 5/15 back to Mon 5/11 — five consecutive trading days.
+    assert nth_business_day_back(date(2026, 5, 15), 5) == date(2026, 5, 11)
+
+
+def test_nth_business_day_back_5_from_monday_skips_weekend() -> None:
+    # Mon 5/18 counts back over the weekend to Tue 5/12.
+    assert nth_business_day_back(date(2026, 5, 18), 5) == date(2026, 5, 12)
+
+
+def test_nth_business_day_back_skips_holiday() -> None:
+    # A window ending Fri 5/29 skips Memorial Day (Mon 5/25) → starts Fri 5/22.
+    assert nth_business_day_back(date(2026, 5, 29), 5) == date(2026, 5, 22)
+
+
+def test_nth_business_day_back_non_trading_end_is_skipped() -> None:
+    # Sat 5/16 is not counted; the first business day back is Fri 5/15.
+    assert nth_business_day_back(date(2026, 5, 16), 1) == date(2026, 5, 15)
+
+
+def test_nth_business_day_back_rejects_n_below_one() -> None:
+    with pytest.raises(ValueError):
+        nth_business_day_back(date(2026, 5, 14), 0)

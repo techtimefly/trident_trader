@@ -100,3 +100,22 @@ def next_trading_day(after: date) -> date:
     while not is_trading_day(d):
         d += timedelta(days=1)
     return d
+
+
+def nth_business_day_back(end: date, n: int) -> date:
+    """The trading day that begins an ``n``-trading-day window ending on ``end``.
+
+    Counts inclusively from ``end``: ``n=1`` returns ``end`` if it is a trading
+    day, otherwise the most recent trading day on or before it. A non-trading
+    ``end`` is skipped and not counted. Raises ``ValueError`` for ``n < 1``.
+    """
+    if n < 1:
+        raise ValueError("n must be >= 1")
+    count = 0
+    d = end
+    while True:
+        if is_trading_day(d):
+            count += 1
+            if count == n:
+                return d
+        d -= timedelta(days=1)

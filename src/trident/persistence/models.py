@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -299,3 +300,23 @@ class SuggestionRow(Base):
     confidence: Mapped[str] = mapped_column(String(16))  # low | medium | high
 
     run: Mapped[SuggestionRun] = relationship(back_populates="suggestions")
+
+
+class Watchlist(Base):
+    """DB-backed watchlist row.
+
+    ``symbols`` is a JSON array of ticker strings. ``source`` records how this
+    row was created: ``"static"`` (seeded from the module constant),
+    ``"manual"`` (dashboard edit), or ``"screener"`` (promoted from a screen
+    run). Only rows where ``is_active`` is True are read by
+    ``resolve_watchlist()``.
+    """
+
+    __tablename__ = "watchlists"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

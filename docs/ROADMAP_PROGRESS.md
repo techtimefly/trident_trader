@@ -10,7 +10,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 - [x] Complete — pluggable strategy registry + comparison tooling (commit 29e923a).
 
 ## Phase 2 — Breadth
-- [ ] 2.1 Add the `watchlists` table + Alembic migration `0008_watchlist` (chains from `0007_suggestion_tables`).
+- [x] 2.1 Add the `watchlists` table + Alembic migration `0008_watchlist` (chains from `0007_suggestion_tables`).
 - [ ] 2.2 Add `src/trident/persistence/watchlist_store.py` (DB read/write helpers) + tests.
 - [ ] 2.3 Reroute `resolve_watchlist()` in `src/trident/watchlist.py` to the DB store with a static fallback — never resolve to empty + tests.
 - [ ] 2.4 Add the dashboard `/api/watchlist` GET/POST panel (`_watchlist.html`) with a screener-promote action.

@@ -37,7 +37,7 @@ Legend: `- [ ]` to do · `- [x]` done · `- [!]` blocked (reason inline).
 - [x] 4.7 Handle approved-but-unsubmitted signals on startup (mark stale + log).
 
 ## Phase 5 — Live trading sketch (docs only)
-- [ ] 5.1 Write `docs/LIVE_TRADING.md` — the gated real-money design note + ramp checklist. No code; do NOT create `live_run.py`.
+- [x] 5.1 Write `docs/LIVE_TRADING.md` — the gated real-money design note + ramp checklist. No code; do NOT create `live_run.py`.
 
 ## Final
 - [ ] R.1 Full code review of the whole application; score each feature from the perspective of a real day trader; write the result to `docs/DAY_TRADER_REVIEW.md`.

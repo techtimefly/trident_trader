@@ -29,15 +29,18 @@ from trident.data.feed import AlpacaBarFeed
 from trident.data.persistence import persist_bar
 from trident.execution.alpaca import AlpacaBroker
 from trident.execution.orders import build_bracket
+from trident.persistence import managed_position
 from trident.persistence.daily_plan import resolve_today
 from trident.persistence.models import Signal as SignalRow
 from trident.persistence.session import session_scope
 from trident.persistence.state import kill_switch_engaged, write_heartbeat
+from trident.portfolio.manage import apply_management_actions
 from trident.portfolio.tracking import reconcile_positions, sync_orders
 from trident.risk.gate import AccountState, MarketState, evaluate
 from trident.risk.limits import RiskLimits
 from trident.safety.eod_flatten import flatten_now, seconds_until_flatten
 from trident.settings import get_settings
+from trident.strategies.management import ManagesPositions
 from trident.strategies.registry import available_strategies, build_strategy
 from trident.watchlist import WATCHLIST
 
@@ -96,11 +99,47 @@ async def main(strategy_name: str = "orb_5m") -> None:
     for sig_name in (os_signal.SIGINT, os_signal.SIGTERM):
         loop.add_signal_handler(sig_name, _stop)
 
+    def _manage_open_positions(bar: Bar) -> None:
+        """Re-evaluate this symbol's open managed position, every bar.
+
+        A no-op unless the running strategy implements ManagesPositions — ORB
+        and VwapReversion are entry-only, so the loop simply finds no work.
+        """
+        if not isinstance(strategy, ManagesPositions):
+            return
+        try:
+            views = managed_position.list_open_for_strategy(strategy.name)
+        except Exception:
+            log.exception("manage_list_failed", symbol=bar.symbol)
+            return
+        for view in views:
+            if view.symbol != bar.symbol:
+                continue
+            try:
+                actions = strategy.manage(bar, store, view)
+            except Exception:
+                log.exception("strategy_manage_failed", symbol=view.symbol)
+                continue
+            if not actions:
+                continue
+            try:
+                outcome = apply_management_actions(broker, view, actions)
+                if outcome.fully_closed:
+                    managed_position.remove(view.symbol)
+                elif outcome.new_stop is not None:
+                    managed_position.update_stop(view.symbol, outcome.new_stop)
+            except Exception:
+                log.exception("apply_management_failed", symbol=view.symbol)
+
     async def on_bar(bar: Bar) -> None:
         try:
             persist_bar(bar)
         except Exception:
             log.exception("persist_bar_failed", symbol=bar.symbol)
+
+        # Active management runs every bar, before the entry path — an open
+        # position is re-evaluated whether or not a fresh signal also fires.
+        _manage_open_positions(bar)
 
         sig = strategy.on_bar(bar, store)
         if sig is None:
@@ -192,6 +231,23 @@ async def main(strategy_name: str = "orb_5m") -> None:
             )
         except Exception:
             log.exception("order_submission_failed", symbol=sig.symbol)
+            return
+
+        # Record the position for active management. Optimistic — the bracket
+        # may not fill — but the EOD flatten and reconcile loop keep it honest;
+        # a managing strategy can then trail / scale / exit it bar by bar.
+        try:
+            managed_position.record_open(
+                symbol=sig.symbol,
+                strategy=strategy.name,
+                side=sig.side,
+                qty=decision.shares,
+                avg_entry=sig.entry_price,
+                stop_price=sig.stop_price,
+                target_price=sig.target_price,
+            )
+        except Exception:
+            log.exception("managed_position_record_failed", symbol=sig.symbol)
 
     feed = AlpacaBarFeed(
         api_key=settings.alpaca_api_key,

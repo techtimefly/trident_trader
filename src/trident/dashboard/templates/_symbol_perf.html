@@ -1,0 +1,44 @@
+{% if load_error %}
+<div class="empty">Could not load symbol performance. Check the database connection.</div>
+{% elif not rows %}
+<div class="empty">
+    No backtest data yet. Run
+    <span class="mono">trident replay --days 90</span> to populate.
+</div>
+{% else %}
+<div class="max-h-[32rem] overflow-y-auto">
+<table class="tt mono text-sm">
+    <thead class="sticky top-0 bg-[var(--panel)]">
+        <tr>
+            <th>Symbol</th>
+            <th>Backtest trades</th>
+            <th>Win rate</th>
+            <th>Avg R</th>
+            <th>Sim P&amp;L</th>
+            <th>Live trades</th>
+            <th>Live P&amp;L</th>
+            <th>Last traded</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="font-semibold">{{ r.symbol }}</td>
+            <td>{{ r.trades }} <span class="dim">({{ r.wins }}W/{{ r.losses }}L)</span></td>
+            <td class="{{ 'pos' if r.win_rate_positive else 'neg' }}">{{ r.win_rate }}</td>
+            <td class="{{ 'pos' if r.avg_r_positive else 'neg' }}">{{ r.avg_r }}</td>
+            <td class="{{ 'pos' if r.total_pnl_positive else 'neg' }}">{{ r.total_pnl }}</td>
+            {% if r.live %}
+            <td>{{ r.live.trades }}</td>
+            <td class="{{ 'pos' if r.live.total_pnl_positive else 'neg' }}">{{ r.live.total_pnl }}</td>
+            {% else %}
+            <td class="dim">—</td>
+            <td class="dim">—</td>
+            {% endif %}
+            <td class="dim">{{ r.last_traded }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}

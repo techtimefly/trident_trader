@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import subprocess
+import sys
 import threading
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -24,7 +27,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select, text
+from sqlalchemy import case, func, select, text
 
 from trident.audit.log import configure_logging, get_logger
 from trident.clock import ET, is_market_open, now_et, nth_business_day_back
@@ -93,6 +96,8 @@ from trident.watchlist import WATCHLIST
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
+# Project root: app.py lives at src/trident/dashboard/app.py — go up 4 levels.
+_PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 
 configure_logging()
 app = FastAPI(title="Trident Trader")
@@ -1390,6 +1395,445 @@ async def api_manage_action(request: Request) -> Any:
     return templates.TemplateResponse(
         request, "_manage.html", _manage_context(notice=notice, error=error)
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — Symbol performance panel
+# ---------------------------------------------------------------------------
+
+def _symbol_perf_context() -> dict[str, Any]:
+    """Per-symbol aggregated stats from ReplayTrade + LiveTrade.
+
+    Outer-ring: a DB hiccup degrades to a placeholder rather than 500-ing.
+    Queries every ReplayTrade ever stored (all runs), giving the largest
+    available sample. LiveTrade rows supplement with real paper-trade results.
+    """
+    try:
+        with session_scope() as s:
+            # Replay aggregates across all runs, grouped by symbol
+            replay_rows = s.execute(
+                select(
+                    ReplayTrade.symbol,
+                    func.count().label("trades"),
+                    func.sum(case((ReplayTrade.pnl > 0, 1), else_=0)).label("wins"),
+                    func.sum(case((ReplayTrade.pnl <= 0, 1), else_=0)).label("losses"),
+                    func.avg(ReplayTrade.r_multiple).label("avg_r"),
+                    func.sum(ReplayTrade.pnl).label("total_pnl"),
+                    func.max(ReplayTrade.trade_date).label("last_traded"),
+                )
+                .group_by(ReplayTrade.symbol)
+                .order_by(func.sum(ReplayTrade.pnl).desc())
+            ).all()
+
+            # Live trades (real paper round-trips)
+            live_rows = s.execute(
+                select(
+                    LiveTrade.symbol,
+                    func.count().label("trades"),
+                    func.sum(case((LiveTrade.net_pnl > 0, 1), else_=0)).label("wins"),
+                    func.sum(case((LiveTrade.net_pnl <= 0, 1), else_=0)).label("losses"),
+                    func.avg(LiveTrade.r_multiple).label("avg_r"),
+                    func.sum(LiveTrade.net_pnl).label("total_pnl"),
+                    func.max(LiveTrade.entry_ts).label("last_traded"),
+                )
+                .group_by(LiveTrade.symbol)
+            ).all()
+
+        live_by_sym: dict[str, Any] = {r.symbol: r for r in live_rows}
+
+        rows: list[dict[str, Any]] = []
+        for r in replay_rows:
+            win_rate = (float(r.wins) / float(r.trades) * 100.0) if r.trades else 0.0
+            live = live_by_sym.get(r.symbol)
+            live_view = None
+            if live and live.trades:
+                lr = float(live.wins) / float(live.trades) * 100.0
+                live_view = {
+                    "trades": live.trades,
+                    "win_rate": f"{lr:.0f}%",
+                    "total_pnl": _fmt_money(Decimal(str(live.total_pnl))),
+                    "total_pnl_positive": float(live.total_pnl) >= 0,
+                }
+            rows.append(
+                {
+                    "symbol": r.symbol,
+                    "trades": r.trades,
+                    "wins": r.wins,
+                    "losses": r.losses,
+                    "win_rate": f"{win_rate:.0f}%",
+                    "win_rate_positive": win_rate >= 50,
+                    "avg_r": f"{float(r.avg_r):+.2f}" if r.avg_r is not None else "—",
+                    "avg_r_positive": float(r.avg_r or 0) >= 0,
+                    "total_pnl": _fmt_money(Decimal(str(r.total_pnl))),
+                    "total_pnl_positive": float(r.total_pnl) >= 0,
+                    "last_traded": (
+                        r.last_traded.astimezone(ET).strftime("%Y-%m-%d")
+                        if r.last_traded
+                        else "—"
+                    ),
+                    "live": live_view,
+                }
+            )
+    except Exception:
+        return {"rows": [], "load_error": True}
+    return {"rows": rows, "load_error": False}
+
+
+@app.get("/api/symbol-perf", response_class=HTMLResponse)
+def api_symbol_perf(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_symbol_perf.html", _symbol_perf_context())
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Backtest trigger + history UI
+# ---------------------------------------------------------------------------
+
+_backtest_run_lock = threading.Lock()
+
+
+def _run_backtest_background(days: int, strategy: str, window_days: int) -> None:
+    """Run scripts/backtest.py as a subprocess so it persists results to the DB.
+
+    Always releases the lock when done. Outer-ring: a failure is logged and
+    swallowed — the history panel just keeps showing the previous results.
+    """
+    log = get_logger("dashboard.backtest_run")
+    try:
+        env = dict(os.environ)
+        src_path = str(_PROJECT_ROOT / "src")
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{src_path}:{existing}" if existing else src_path
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "scripts/backtest.py",
+                "--days",
+                str(days),
+                "--strategy",
+                strategy,
+                "--window-days",
+                str(window_days),
+            ],
+            cwd=str(_PROJECT_ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if proc.returncode != 0:
+            log.warning(
+                "backtest_subprocess_failed",
+                returncode=proc.returncode,
+                stderr=proc.stderr[:500],
+            )
+        else:
+            log.info(
+                "backtest_subprocess_done", days=days, strategy=strategy
+            )
+    except Exception:
+        log.exception("backtest_subprocess_error")
+    finally:
+        _backtest_run_lock.release()
+
+
+def _start_backtest_run(days: int, strategy: str, window_days: int) -> tuple[str, bool]:
+    """Kick off a background backtest run. Returns (notice, is_error)."""
+    if not _backtest_run_lock.acquire(blocking=False):
+        return "A backtest is already running — results appear when it finishes.", True
+    try:
+        threading.Thread(
+            target=_run_backtest_background,
+            args=(days, strategy, window_days),
+            daemon=True,
+        ).start()
+    except Exception:
+        _backtest_run_lock.release()
+        return "Could not start the backtest.", True
+    return (
+        f"Backtest started ({days}d · {strategy} · {window_days}d windows) — "
+        "the history panel updates when it finishes.",
+        False,
+    )
+
+
+def _backtest_history_context(
+    notice: str | None = None, error: bool = False
+) -> dict[str, Any]:
+    """All ReplayRun rows ordered newest-first, plus the run trigger form.
+
+    Outer-ring: a DB hiccup degrades to a placeholder.
+    """
+    base: dict[str, Any] = {
+        "notice": notice,
+        "notice_error": error,
+        "running": _backtest_run_lock.locked(),
+        "strategies": available_strategies(),
+    }
+    try:
+        with session_scope() as s:
+            runs = list(
+                s.scalars(
+                    select(ReplayRun).order_by(ReplayRun.started_at.desc()).limit(50)
+                )
+            )
+        rows = [
+            {
+                "id": str(run.id),
+                "started_at": run.started_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
+                "window": (
+                    f"{run.first_day.strftime('%b %d')} → "
+                    f"{run.last_day.strftime('%b %d')}"
+                ),
+                "days": run.days,
+                "strategy": run.strategy,
+                "num_trades": run.num_trades,
+                "wins": run.wins,
+                "losses": run.losses,
+                "win_rate": (
+                    f"{float(run.wins) / float(run.num_trades) * 100.0:.1f}%"
+                    if run.num_trades
+                    else "—"
+                ),
+                "avg_r": f"{run.avg_r:+.2f}",
+                "avg_r_positive": run.avg_r >= 0,
+                "total_pnl": _fmt_money(run.total_pnl),
+                "total_pnl_positive": run.total_pnl >= 0,
+                "mode": run.mode,
+                "is_honest": run.mode == "honest",
+            }
+            for run in runs
+        ]
+    except Exception:
+        return {**base, "rows": [], "load_error": True}
+    return {**base, "rows": rows, "load_error": False}
+
+
+@app.get("/api/backtest-history", response_class=HTMLResponse)
+def api_backtest_history(request: Request) -> Any:
+    return templates.TemplateResponse(
+        request, "_backtest_history.html", _backtest_history_context()
+    )
+
+
+@app.post("/api/backtest-run", response_class=HTMLResponse)
+async def api_backtest_run(request: Request) -> Any:
+    form = parse_qs((await request.body()).decode("utf-8"))
+    days_raw = (form.get("days") or ["30"])[0].strip()
+    strategy = (form.get("strategy") or ["orb_5m"])[0].strip()
+    window_raw = (form.get("window_days") or ["5"])[0].strip()
+    try:
+        days = int(days_raw)
+        window_days = int(window_raw)
+        if days < 1 or days > 500:
+            raise ValueError("days out of range")
+        if window_days < 1 or window_days > 90:
+            raise ValueError("window_days out of range")
+        if strategy not in available_strategies():
+            raise ValueError("unknown strategy")
+    except (ValueError, ArithmeticError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "_backtest_history.html",
+            _backtest_history_context(notice=str(exc), error=True),
+        )
+    notice, err = _start_backtest_run(days, strategy, window_days)
+    return templates.TemplateResponse(
+        request, "_backtest_history.html", _backtest_history_context(notice=notice, error=err)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Signal history + outcome linking
+# ---------------------------------------------------------------------------
+
+def _parse_signal_date(date_str: str | None) -> date:
+    """Parse YYYY-MM-DD string to a date, defaulting to today (ET)."""
+    if date_str:
+        try:
+            return date.fromisoformat(date_str.strip())
+        except ValueError:
+            pass
+    return now_et().date()
+
+
+def _signal_history_context(date_str: str | None = None) -> dict[str, Any]:
+    """Signals for a given date with their entry-order outcomes.
+
+    Outer-ring: a DB hiccup degrades to a placeholder.
+    """
+    target_date = _parse_signal_date(date_str)
+    cutoff = datetime.combine(target_date, datetime.min.time(), tzinfo=ET)
+    next_day = cutoff + timedelta(days=1)
+    try:
+        with session_scope() as s:
+            signals = list(
+                s.scalars(
+                    select(Signal)
+                    .where(Signal.ts >= cutoff)
+                    .where(Signal.ts < next_day)
+                    .order_by(Signal.ts.desc())
+                    .limit(100)
+                )
+            )
+            # Map signal_id → entry order (parent order, no parent_order_id)
+            sig_ids = [sig.id for sig in signals]
+            entry_orders: dict[uuid.UUID, OrderModel] = {}
+            if sig_ids:
+                orders = list(
+                    s.scalars(
+                        select(OrderModel)
+                        .where(OrderModel.signal_id.in_(sig_ids))
+                        .where(OrderModel.parent_order_id.is_(None))
+                    )
+                )
+                entry_orders = {o.signal_id: o for o in orders if o.signal_id}
+
+        rows = []
+        for sig in signals:
+            order = entry_orders.get(sig.id)
+            order_view: dict[str, Any] | None = None
+            if order:
+                order_view = {
+                    "state": order.state,
+                    "fill_price": (
+                        _fmt_money(order.avg_fill_price) if order.avg_fill_price else "—"
+                    ),
+                    "filled_at": (
+                        order.filled_at.astimezone(ET).strftime("%H:%M:%S")
+                        if order.filled_at
+                        else "—"
+                    ),
+                    "is_filled": order.state == "filled",
+                    "is_rejected": order.state in {"rejected", "canceled", "cancelled", "expired"},
+                    "is_pending": order.state not in {
+                        "filled", "rejected", "canceled", "cancelled", "expired"
+                    },
+                }
+            rows.append(
+                {
+                    "ts": sig.ts.astimezone(ET).strftime("%H:%M:%S"),
+                    "symbol": sig.symbol,
+                    "side": sig.side,
+                    "strategy": sig.strategy,
+                    "entry": _fmt_money(sig.entry_price),
+                    "stop": _fmt_money(sig.stop_price),
+                    "target": _fmt_money(sig.target_price),
+                    "decision": sig.gate_decision or "—",
+                    "reason": sig.gate_reason or "—",
+                    "approved": sig.gate_decision == "approved",
+                    "order": order_view,
+                }
+            )
+    except Exception:
+        return {
+            "rows": [],
+            "load_error": True,
+            "selected_date": target_date.isoformat(),
+        }
+    return {
+        "rows": rows,
+        "load_error": False,
+        "selected_date": target_date.isoformat(),
+    }
+
+
+@app.get("/api/signal-history", response_class=HTMLResponse)
+def api_signal_history(request: Request, date: str | None = None) -> Any:
+    return templates.TemplateResponse(
+        request, "_signal_history.html", _signal_history_context(date)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — Screener → performance feedback
+# ---------------------------------------------------------------------------
+
+def _screen_perf_context() -> dict[str, Any]:
+    """Per-symbol replay stats overlaid on the latest screen's matches.
+
+    For each symbol in the most recent screen run, shows how it performed
+    in backtests (if any trades exist). Also shows the overall backtest
+    average so the reader can compare screener-sourced symbols vs. the field.
+    Outer-ring: a DB hiccup degrades to a placeholder.
+    """
+    try:
+        latest = get_latest_screen()
+    except Exception:
+        return {"rows": [], "summary": None, "load_error": True}
+    if latest is None or not latest.matches:
+        return {"rows": [], "summary": None, "load_error": False}
+
+    screen_symbols = [c.symbol for c in latest.matches]
+
+    try:
+        with session_scope() as s:
+            # Stats for all symbols ever backtested
+            all_stats = {
+                r.symbol: r
+                for r in s.execute(
+                    select(
+                        ReplayTrade.symbol,
+                        func.count().label("trades"),
+                        func.sum(case((ReplayTrade.pnl > 0, 1), else_=0)).label("wins"),
+                        func.avg(ReplayTrade.r_multiple).label("avg_r"),
+                        func.sum(ReplayTrade.pnl).label("total_pnl"),
+                    )
+                    .group_by(ReplayTrade.symbol)
+                ).all()
+            }
+
+            # Overall backtest summary (for comparison baseline)
+            overall = s.execute(
+                select(
+                    func.count().label("trades"),
+                    func.sum(case((ReplayTrade.pnl > 0, 1), else_=0)).label("wins"),
+                    func.avg(ReplayTrade.r_multiple).label("avg_r"),
+                    func.sum(ReplayTrade.pnl).label("total_pnl"),
+                )
+            ).one()
+    except Exception:
+        return {"rows": [], "summary": None, "load_error": True}
+
+    rows: list[dict[str, Any]] = []
+    for sym in screen_symbols:
+        st = all_stats.get(sym)
+        if st and st.trades:
+            win_rate = float(st.wins) / float(st.trades) * 100.0
+            rows.append(
+                {
+                    "symbol": sym,
+                    "trades": st.trades,
+                    "win_rate": f"{win_rate:.0f}%",
+                    "win_rate_positive": win_rate >= 50,
+                    "avg_r": f"{float(st.avg_r):+.2f}" if st.avg_r is not None else "—",
+                    "avg_r_positive": float(st.avg_r or 0) >= 0,
+                    "total_pnl": _fmt_money(Decimal(str(st.total_pnl))),
+                    "total_pnl_positive": float(st.total_pnl) >= 0,
+                    "has_data": True,
+                }
+            )
+        else:
+            rows.append({"symbol": sym, "has_data": False})
+
+    # Overall baseline
+    summary = None
+    if overall.trades:
+        ov_wr = float(overall.wins) / float(overall.trades) * 100.0
+        summary = {
+            "trades": overall.trades,
+            "win_rate": f"{ov_wr:.1f}%",
+            "avg_r": f"{float(overall.avg_r):+.2f}" if overall.avg_r is not None else "—",
+            "total_pnl": _fmt_money(Decimal(str(overall.total_pnl))),
+            "total_pnl_positive": float(overall.total_pnl or 0) >= 0,
+        }
+
+    return {"rows": rows, "summary": summary, "load_error": False}
+
+
+@app.get("/api/screen-perf", response_class=HTMLResponse)
+def api_screen_perf(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_screen_perf.html", _screen_perf_context())
 
 
 # ---------------------------------------------------------------------------

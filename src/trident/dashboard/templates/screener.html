@@ -6,6 +6,7 @@
     <div class="nav-group px-2 mb-1">Screener</div>
     <a class="nav-link" href="#panel-screen-presets">Screen filters</a>
     <a class="nav-link" href="#panel-screen">Latest screen</a>
+    <a class="nav-link" href="#panel-screen-perf">Backtest overlay</a>
     <a class="nav-link" href="#panel-suggest">AI suggestions</a>
 </div>
 {% endblock %}
@@ -35,6 +36,20 @@
         hx-get="/api/screen"
         hx-trigger="load, every 30s"
         hx-include="#screen-watchlist-select"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-screen-perf" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Backtest overlay</h2>
+        <span class="pill pill-dim">screener symbols · replay performance</span>
+    </div>
+    <div
+        id="screen-perf"
+        hx-get="/api/screen-perf"
+        hx-trigger="load, every 60s"
         hx-swap="innerHTML">
         <div class="skeleton h-32 m-4 rounded-md"></div>
     </div>

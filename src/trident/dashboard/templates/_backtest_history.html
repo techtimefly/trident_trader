@@ -1,0 +1,88 @@
+{% if notice %}
+<div class="px-5 py-2 text-sm {% if notice_error %}neg{% else %}pos{% endif %}">
+    {{ notice }}
+</div>
+{% endif %}
+
+<div class="px-5 py-4 border-b border-[var(--border)]">
+    <form hx-post="/api/backtest-run"
+          hx-target="#backtest-history"
+          hx-swap="innerHTML"
+          hx-indicator="#backtest-spinner"
+          class="flex flex-wrap items-end gap-3">
+        <div>
+            <label class="block text-xs dim mb-1">Days</label>
+            <input type="number" name="days" value="30" min="1" max="500"
+                   class="mono text-sm px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--panel-2)] w-20" />
+        </div>
+        <div>
+            <label class="block text-xs dim mb-1">Strategy</label>
+            <select name="strategy"
+                    class="mono text-sm px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--panel-2)]">
+                {% for s in strategies %}
+                <option value="{{ s }}">{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs dim mb-1">Window days</label>
+            <input type="number" name="window_days" value="5" min="1" max="90"
+                   class="mono text-sm px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--panel-2)] w-20" />
+        </div>
+        <button type="submit" class="btn btn-ghost text-sm"
+                {% if running %}disabled title="A backtest is already running"{% endif %}>
+            {% if running %}
+                <span id="backtest-spinner">Running…</span>
+            {% else %}
+                Run backtest
+            {% endif %}
+        </button>
+        <span class="text-xs dim self-center">Fetches live Alpaca bars — takes a few minutes.</span>
+    </form>
+</div>
+
+{% if load_error %}
+<div class="empty">Could not load backtest history. Check the database connection.</div>
+{% elif not rows %}
+<div class="empty">
+    No runs yet. Use the form above or run
+    <span class="mono">trident backtest --days 30</span> from the CLI.
+</div>
+{% else %}
+<div class="max-h-96 overflow-y-auto">
+<table class="tt mono text-sm">
+    <thead class="sticky top-0 bg-[var(--panel)]">
+        <tr>
+            <th>Run</th>
+            <th>Window</th>
+            <th>Strategy</th>
+            <th>Trades</th>
+            <th>Win rate</th>
+            <th>Avg R</th>
+            <th>Net P&amp;L</th>
+            <th>Mode</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="dim">{{ r.started_at }}</td>
+            <td class="dim">{{ r.window }} &middot; {{ r.days }}d</td>
+            <td class="font-semibold">{{ r.strategy }}</td>
+            <td>{{ r.num_trades }} <span class="dim">({{ r.wins }}W/{{ r.losses }}L)</span></td>
+            <td>{{ r.win_rate }}</td>
+            <td class="{{ 'pos' if r.avg_r_positive else 'neg' }}">{{ r.avg_r }}</td>
+            <td class="{{ 'pos' if r.total_pnl_positive else 'neg' }}">{{ r.total_pnl }}</td>
+            <td>
+                {% if r.is_honest %}
+                    <span class="pill pill-amber">honest</span>
+                {% else %}
+                    <span class="pill pill-dim">idealistic</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}

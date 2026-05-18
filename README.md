@@ -195,12 +195,16 @@ market state, bot heartbeat, and the kill switch.
   bid/ask, volume from the IEX snapshot feed); add/remove symbols,
   create/rename/activate/delete lists. The runner trades the active list.
 - **Screener** — managed screen-filter presets (editable criteria, activate /
-  delete); latest screen results with an "add to watchlist" action; AI stock
-  suggestions panel with a **Run pre-market check** button. AI suggestions
+  delete); latest screen results with an "add to watchlist" action; backtest
+  overlay panel showing how screener symbols have performed in replay runs; AI
+  stock suggestions panel with a **Run pre-market check** button. AI suggestions
   require `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`; degrades gracefully
   if neither is set.
-- **Research** — per-trade P&L for closed live trades; latest replay run
-  summary and trade list; strategy comparison panel.
+- **Research** — per-trade P&L for closed live trades; per-symbol aggregated
+  stats (trades, win rate, avg R, total P&L) across all runs; signal history
+  browser (by date, with fill prices); latest replay run summary and trade list;
+  backtest history (all runs, newest-first) with a trigger form for new backtest
+  runs; strategy comparison panel.
 - **System** — settings panel (API keys, risk defaults, operational config,
   backtest cost model — edits `.env` in-place); connection health (Alpaca, FMP,
   DB); live log tail; last 24 hours of audit events.

@@ -198,7 +198,7 @@ exist".
 
 ## Test policy
 
-- 363 unit tests; they run in <1s and need no network or database.
+- 378 unit tests; they run in <1s and need no network or database.
 - Risk gate, position sizing, ORB, EOD timing, and the fill simulator have
   exhaustive branch coverage.
 - Inner-ring code (gate, execution, safety, portfolio) must ship with tests in the

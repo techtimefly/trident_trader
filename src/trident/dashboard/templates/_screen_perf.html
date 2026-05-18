@@ -1,0 +1,46 @@
+{% if load_error %}
+<div class="empty">Could not load performance data. Check the database connection.</div>
+{% elif not rows %}
+<div class="empty">
+    Run a screen first, then run a backtest to see how screener symbols performed.
+    <span class="dim">Tip: <span class="mono">trident replay --days 90</span></span>
+</div>
+{% else %}
+{% if summary %}
+<div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-6 text-sm">
+    <span class="dim text-xs uppercase tracking-widest">All-symbol baseline</span>
+    <span>{{ summary.trades }} trades</span>
+    <span>Win rate {{ summary.win_rate }}</span>
+    <span>Avg R {{ summary.avg_r }}</span>
+    <span class="{{ 'pos' if summary.total_pnl_positive else 'neg' }}">{{ summary.total_pnl }} total</span>
+</div>
+{% endif %}
+<div class="max-h-96 overflow-y-auto">
+<table class="tt mono text-sm">
+    <thead class="sticky top-0 bg-[var(--panel)]">
+        <tr>
+            <th>Symbol</th>
+            <th>Backtest trades</th>
+            <th>Win rate</th>
+            <th>Avg R</th>
+            <th>Sim P&amp;L</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="font-semibold">{{ r.symbol }}</td>
+            {% if r.has_data %}
+            <td>{{ r.trades }}</td>
+            <td class="{{ 'pos' if r.win_rate_positive else 'neg' }}">{{ r.win_rate }}</td>
+            <td class="{{ 'pos' if r.avg_r_positive else 'neg' }}">{{ r.avg_r }}</td>
+            <td class="{{ 'pos' if r.total_pnl_positive else 'neg' }}">{{ r.total_pnl }}</td>
+            {% else %}
+            <td class="dim" colspan="4">No backtest data — not in any replay window</td>
+            {% endif %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}

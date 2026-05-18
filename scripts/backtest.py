@@ -38,7 +38,7 @@ from trident.clock import ET, is_trading_day
 from trident.risk.limits import RiskLimits
 from trident.settings import get_settings
 from trident.strategies.registry import available_strategies
-from trident.watchlist import WATCHLIST
+from trident.watchlist import resolve_watchlist
 
 _RULE = "=" * 105
 _THIN = "-" * 105
@@ -216,19 +216,21 @@ def main() -> int:
             anchor = anchor - timedelta(days=1)
         days = trading_days_back(anchor, args.days)
 
+    watchlist = resolve_watchlist()
     log.info(
         "backtest_starting",
         days=[d.isoformat() for d in days],
         window_days=args.window_days,
         slippage_bps=str(args.slippage_bps),
+        watchlist=watchlist,
     )
     all_trades: list[SimulatedTrade] = []
     for d in days:
         start = datetime.combine(d, time(8, 0), tzinfo=ET).astimezone(UTC)
         end = datetime.combine(d, time(20, 0), tzinfo=ET).astimezone(UTC)
-        bars = fetch_minute_bars(start, end, WATCHLIST)
+        bars = fetch_minute_bars(start, end, watchlist)
         all_trades.extend(
-            run_day(d, bars, args.equity, limits, WATCHLIST, costs, log, strategy_name=args.strategy)
+            run_day(d, bars, args.equity, limits, watchlist, costs, log, strategy_name=args.strategy)
         )
 
     print_backtest_report(all_trades, costs, args.equity)
@@ -238,7 +240,7 @@ def main() -> int:
         run_id = save_replay(
             days=[datetime(d.year, d.month, d.day, tzinfo=UTC) for d in days],
             equity=args.equity,
-            watchlist=WATCHLIST,
+            watchlist=watchlist,
             strategy=args.strategy,
             trades=all_trades,
             mode="honest",

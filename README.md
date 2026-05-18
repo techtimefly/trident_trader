@@ -12,8 +12,9 @@ is correctness and discipline, not feature breadth.
 
 - **Strategies:** selected by name from a registry — `orb_5m` (Opening Range
   Breakout) and `vwap_reversion` (VWAP mean-reversion, long + short). Traded on a
-  DB-backed watchlist that defaults to liquid US large-caps (SPY, QQQ, AAPL, MSFT,
-  NVDA, AMD).
+  DB-backed watchlist. Multiple named watchlists are supported; exactly one is
+  active at a time, and the runner trades that one. With none set, the watchlist
+  falls back to liquid US large-caps (SPY, QQQ, AAPL, MSFT, NVDA, AMD).
 - **Broker:** Alpaca paper account (the adapter refuses non-paper URLs).
 - **Data:** Alpaca's bundled IEX feed.
 - **Modes:**
@@ -144,6 +145,9 @@ Open <http://127.0.0.1:8765>. The page shows:
 - Market open/closed indicator and a heartbeat-based bot status.
 - Open positions in the Alpaca paper account.
 - Today's signals with the gate decision next to each.
+- Watchlists — every named list with live per-symbol quotes (last price, day
+  change, bid/ask, volume from the IEX snapshot feed); add/remove symbols,
+  create/rename/activate/delete lists. The runner trades the active list.
 - The last 24 hours of audit events.
 - A red **kill switch** button. Engaging it makes the gate reject every new
   signal until you release it. The toggle is persisted to the `system_state`

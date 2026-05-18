@@ -1,66 +1,133 @@
 {% if load_error %}
-<div class="empty">Could not load watchlist. Check the database connection.</div>
+<div class="empty">Could not load watchlists. Check the database connection.</div>
 {% else %}
 <div class="p-5 space-y-5">
 
+    {% if notice %}
     <div>
-        <div class="text-xs dim uppercase tracking-widest mb-2">Active symbols</div>
-        {% if current %}
-        <div class="flex flex-wrap gap-2 items-center">
-            {% for sym in current.symbols %}
-            <span class="pill pill-dim mono">{{ sym }}</span>
-            {% endfor %}
-        </div>
-        <div class="text-xs dim mt-2 mono">
-            source: {{ current.source }} &middot; updated {{ current.updated_at }}
-        </div>
-        {% else %}
-        <div class="text-sm dim">No DB row active &mdash; runners use the static fallback: {{ fallback_csv }}.</div>
-        {% endif %}
-    </div>
-
-    <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML"
-          class="border-t border-[var(--border)] pt-4 space-y-3">
-        <input type="hidden" name="action" value="manual" />
-        <div>
-            <label class="text-xs dim uppercase tracking-widest block mb-1">Edit symbols (comma-separated)</label>
-            <input type="text" name="symbols"
-                   value="{{ current.symbols_csv if current else fallback_csv }}"
-                   placeholder="SPY, QQQ, AAPL, ..."
-                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
-        </div>
-        <div class="flex flex-wrap items-center gap-4">
-            <button class="btn btn-ghost text-sm" type="submit">Save watchlist</button>
-            {% if notice and not screen_notice %}
-            <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
-            {% endif %}
-        </div>
-    </form>
-
-    {% if screen_symbols %}
-    <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML"
-          class="border-t border-[var(--border)] pt-4">
-        <input type="hidden" name="action" value="promote" />
-        <div class="text-xs dim uppercase tracking-widest mb-2">Promote from latest screen ({{ screen_symbols | length }} symbols)</div>
-        <div class="flex flex-wrap gap-1 mb-3">
-            {% for sym in screen_symbols %}
-            <span class="pill pill-dim mono text-xs">{{ sym }}</span>
-            {% endfor %}
-        </div>
-        <div class="flex flex-wrap items-center gap-4">
-            <button class="btn btn-ghost text-sm" type="submit">Promote screener results</button>
-            {% if notice and screen_notice %}
-            <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
-            {% endif %}
-        </div>
-    </form>
-    {% else %}
-    <div class="border-t border-[var(--border)] pt-4 text-xs dim">
-        No screener results available. Run
-        <span class="mono">PYTHONPATH=src python scripts/screen.py</span>
-        to populate promote candidates.
+        <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
     </div>
     {% endif %}
+
+    {% if not has_active %}
+    <div class="text-xs dim border border-[var(--border)] rounded px-3 py-2">
+        <span class="pill pill-amber">no active list</span>
+        Runners use the static fallback: <span class="mono">{{ fallback_csv }}</span>.
+        Activate a watchlist below to override it.
+    </div>
+    {% endif %}
+
+    {% for w in watchlists %}
+    <div class="border border-[var(--border)] rounded p-4 space-y-3">
+
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold text-sm">{{ w.name }}</span>
+            {% if w.is_active %}
+            <span class="pill pill-green">active</span>
+            {% endif %}
+            <span class="text-xs dim mono">
+                {{ w.count }} symbol{{ '' if w.count == 1 else 's' }} &middot;
+                {{ w.source }} &middot; updated {{ w.updated_at }}
+            </span>
+            <span class="flex-1"></span>
+            <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML"
+                  class="flex items-center gap-2">
+                <input type="hidden" name="watchlist_id" value="{{ w.id }}" />
+                {% if not w.is_active %}
+                <button class="btn btn-ghost text-xs" type="submit" name="action" value="activate">Activate</button>
+                {% endif %}
+                <button class="btn btn-danger text-xs" type="submit" name="action" value="delete">Delete</button>
+            </form>
+        </div>
+
+        {% if w.rows %}
+        <table class="tt mono text-sm">
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Last</th>
+                    <th>%</th>
+                    <th>Bid/Ask</th>
+                    <th>Vol</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for q in w.rows %}
+                <tr>
+                    <td class="font-semibold">{{ q.symbol }}</td>
+                    <td>{{ q.last }}</td>
+                    <td class="{{ ('pos' if q.positive else 'neg') if q.has_quote else 'dim' }}">{{ q.change_pct }}</td>
+                    <td>{{ q.bid_ask }}</td>
+                    <td>{{ q.volume }}</td>
+                    <td>
+                        <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML">
+                            <input type="hidden" name="action" value="remove_symbol" />
+                            <input type="hidden" name="watchlist_id" value="{{ w.id }}" />
+                            <input type="hidden" name="symbol" value="{{ q.symbol }}" />
+                            <button class="btn btn-ghost text-xs" type="submit"
+                                    title="Remove {{ q.symbol }}">&times;</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-sm dim">No symbols yet &mdash; add some below.</div>
+        {% endif %}
+
+        <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML"
+              class="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="action" value="add_symbols" />
+            <input type="hidden" name="watchlist_id" value="{{ w.id }}" />
+            <input type="text" name="symbols" placeholder="add symbols: TSLA, AMZN"
+                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 flex-1 min-w-[10rem]" />
+            <button class="btn btn-ghost text-sm" type="submit">Add</button>
+        </form>
+
+        <details class="text-xs">
+            <summary class="dim cursor-pointer">Rename &middot; replace all symbols</summary>
+            <div class="mt-2 space-y-2">
+                <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML"
+                      class="flex flex-wrap items-center gap-2">
+                    <input type="hidden" name="action" value="rename" />
+                    <input type="hidden" name="watchlist_id" value="{{ w.id }}" />
+                    <input type="text" name="name" value="{{ w.name }}"
+                           class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 flex-1 min-w-[8rem]" />
+                    <button class="btn btn-ghost text-xs" type="submit">Rename</button>
+                </form>
+                <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML"
+                      class="flex flex-wrap items-center gap-2">
+                    <input type="hidden" name="action" value="set_symbols" />
+                    <input type="hidden" name="watchlist_id" value="{{ w.id }}" />
+                    <input type="text" name="symbols" value="{{ w.symbols_csv }}"
+                           placeholder="SPY, QQQ, AAPL, ..."
+                           class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 flex-1 min-w-[10rem]" />
+                    <button class="btn btn-ghost text-xs" type="submit">Replace all</button>
+                </form>
+            </div>
+        </details>
+    </div>
+    {% endfor %}
+
+    {% if not watchlists %}
+    <div class="text-sm dim">No watchlists yet &mdash; create one below.</div>
+    {% endif %}
+
+    <form hx-post="/api/watchlist" hx-target="#watchlist" hx-swap="innerHTML"
+          class="border-t border-[var(--border)] pt-4 flex flex-wrap items-center gap-2">
+        <input type="hidden" name="action" value="create" />
+        <label class="text-xs dim uppercase tracking-widest">New watchlist</label>
+        <input type="text" name="name" placeholder="e.g. Momentum"
+               class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1" />
+        <button class="btn btn-ghost text-sm" type="submit">Create</button>
+    </form>
+
+    <div class="text-xs dim">
+        The <span class="pill pill-green">active</span> list is what runners trade.
+        Last / bid / ask / volume reflect the IEX feed only.
+    </div>
 
 </div>
 {% endif %}

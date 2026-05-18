@@ -376,18 +376,21 @@ class SuggestionRow(Base):
 
 
 class Watchlist(Base):
-    """DB-backed watchlist row.
+    """A named, DB-backed watchlist.
 
-    ``symbols`` is a JSON array of ticker strings. ``source`` records how this
-    row was created: ``"static"`` (seeded from the module constant),
-    ``"manual"`` (dashboard edit), or ``"screener"`` (promoted from a screen
-    run). Only rows where ``is_active`` is True are read by
-    ``resolve_watchlist()``.
+    Several named watchlists may coexist; exactly one has ``is_active`` True at
+    a time — that is the list ``resolve_watchlist()`` returns to the runner.
+    ``symbols`` is a JSON array of ticker strings. ``source`` records how the
+    list was created: ``"static"`` (seeded from the module constant),
+    ``"manual"`` (dashboard edit), or ``"screener"`` (created from a screen
+    run). ``name`` is unique.
     """
 
     __tablename__ = "watchlists"
+    __table_args__ = (UniqueConstraint("name", name="uq_watchlists_name"),)
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
     symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

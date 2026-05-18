@@ -1,9 +1,10 @@
 """Unit tests for watchlist_store.
 
 Covers the pure normalization helper, the WatchlistRecord value object, the
-VALID_SOURCES constant, and the validation guards that fire before any DB
-access. The DB-touching paths (get_active_watchlist, set_watchlist happy path,
-get_all_watchlists) are exercised by the smoke test.
+VALID_SOURCES constant, the _row_to_record mapper, and the validation guards
+that fire before any DB access. The DB-touching paths (create/rename/activate/
+delete, add/remove/set symbols, list/get) are exercised by manual verification
+against a live database.
 """
 from __future__ import annotations
 
@@ -17,8 +18,9 @@ from trident.persistence.watchlist_store import (
     VALID_SOURCES,
     WatchlistRecord,
     _row_to_record,
+    create_watchlist,
     normalize_symbols,
-    set_watchlist,
+    rename_watchlist,
 )
 
 # ---------------------------------------------------------------------------
@@ -63,6 +65,7 @@ def test_normalize_handles_mixed_case_dedup() -> None:
 def _make_record(**kwargs: object) -> WatchlistRecord:
     defaults: dict[str, object] = {
         "id": uuid.uuid4(),
+        "name": "Default",
         "symbols": ["AAPL"],
         "source": "manual",
         "is_active": True,
@@ -84,6 +87,7 @@ def test_watchlist_record_stores_all_fields() -> None:
     rid = uuid.uuid4()
     r = WatchlistRecord(
         id=rid,
+        name="Momentum",
         symbols=["SPY", "QQQ"],
         source="screener",
         is_active=True,
@@ -91,6 +95,7 @@ def test_watchlist_record_stores_all_fields() -> None:
         updated_at=now,
     )
     assert r.id == rid
+    assert r.name == "Momentum"
     assert r.symbols == ["SPY", "QQQ"]
     assert r.source == "screener"
     assert r.is_active is True
@@ -107,32 +112,32 @@ def test_valid_sources_contains_expected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# set_watchlist — validation guards (raise before touching the DB)
+# Validation guards — raise before touching the DB
 # ---------------------------------------------------------------------------
 
 
-def test_set_watchlist_invalid_source_raises() -> None:
+def test_create_watchlist_blank_name_raises() -> None:
+    with pytest.raises(ValueError, match="must not be blank"):
+        create_watchlist("   ")
+
+
+def test_create_watchlist_invalid_source_raises() -> None:
     with pytest.raises(ValueError, match="Invalid source"):
-        set_watchlist(["AAPL"], "bad_source")
+        create_watchlist("Tech", source="bad_source")
 
 
-def test_set_watchlist_unknown_source_error_lists_valid_sources() -> None:
+def test_create_watchlist_unknown_source_lists_valid_sources() -> None:
     with pytest.raises(ValueError) as exc:
-        set_watchlist(["AAPL"], "live")
+        create_watchlist("Tech", source="live")
     msg = str(exc.value)
     assert "manual" in msg
     assert "screener" in msg
     assert "static" in msg
 
 
-def test_set_watchlist_empty_list_raises() -> None:
-    with pytest.raises(ValueError, match="at least one symbol"):
-        set_watchlist([], "manual")
-
-
-def test_set_watchlist_all_blank_symbols_raises() -> None:
-    with pytest.raises(ValueError, match="at least one symbol"):
-        set_watchlist(["  ", ""], "manual")
+def test_rename_watchlist_blank_name_raises() -> None:
+    with pytest.raises(ValueError, match="must not be blank"):
+        rename_watchlist(uuid.uuid4(), "   ")
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +150,7 @@ def test_row_to_record_copies_all_fields() -> None:
     rid = uuid.uuid4()
     row = MagicMock()
     row.id = rid
+    row.name = "Default"
     row.symbols = ["AAPL", "MSFT"]
     row.source = "manual"
     row.is_active = True
@@ -154,6 +160,7 @@ def test_row_to_record_copies_all_fields() -> None:
     r = _row_to_record(row)
 
     assert r.id == rid
+    assert r.name == "Default"
     assert r.symbols == ["AAPL", "MSFT"]
     assert r.source == "manual"
     assert r.is_active is True
@@ -165,6 +172,7 @@ def test_row_to_record_returns_copy_of_symbols_list() -> None:
     now = datetime.now(UTC)
     row = MagicMock()
     row.id = uuid.uuid4()
+    row.name = "Default"
     row.symbols = ["AAPL"]
     row.source = "static"
     row.is_active = False

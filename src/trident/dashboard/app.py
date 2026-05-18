@@ -27,7 +27,12 @@ from sqlalchemy import select
 
 from trident.audit.log import configure_logging, get_logger
 from trident.clock import ET, is_market_open, now_et, nth_business_day_back
-from trident.dashboard.alpaca_view import get_account, list_positions
+from trident.dashboard.alpaca_view import (
+    QuoteView,
+    get_account,
+    get_quotes,
+    list_positions,
+)
 from trident.persistence.daily_plan import (
     day_trades_in_window,
     get_for_day,
@@ -56,7 +61,17 @@ from trident.persistence.state import (
     last_heartbeat,
     set_kill_switch,
 )
-from trident.persistence.watchlist_store import get_active_watchlist, set_watchlist
+from trident.persistence.watchlist_store import (
+    activate_watchlist,
+    add_symbols,
+    create_watchlist,
+    delete_watchlist,
+    get_watchlist,
+    list_watchlists,
+    remove_symbol,
+    rename_watchlist,
+    set_watchlist_symbols,
+)
 from trident.screener.criteria import ScreenCriteria
 from trident.screener.data import build_candidates, resolve_universe
 from trident.screener.engine import screen
@@ -478,18 +493,51 @@ def _fmt_volume(v: int) -> str:
     return str(v)
 
 
-def _screen_context() -> dict[str, Any]:
-    """Render context for the screener panel: the latest run + its matches.
+def _screen_context(
+    notice: str | None = None, error: bool = False, selected_id: str | None = None
+) -> dict[str, Any]:
+    """Render context for the screener panel: the latest run + its matches,
+    plus the watchlists a result can be added to.
+
+    ``selected_id`` is the watchlist the Add controls should target — carried
+    through re-renders so a non-active list stays picked.
 
     Defensive — the screener is outer-ring; a DB hiccup degrades the panel to
     a placeholder rather than 500-ing the page.
     """
+    # Watchlists for the "add to" picker, plus a symbol -> [list names] map so
+    # each screener row can show which watchlists already hold that symbol.
+    watchlists: list[dict[str, Any]] = []
+    membership: dict[str, list[str]] = {}
+    with contextlib.suppress(Exception):
+        for rec in list_watchlists():
+            watchlists.append(
+                {"id": str(rec.id), "name": rec.name, "is_active": rec.is_active}
+            )
+            for sym in rec.symbols:
+                membership.setdefault(sym, []).append(rec.name)
+    # Which watchlist the Add controls target: the user's pick when it is still
+    # valid, else the active list, else the first. This is what lets a
+    # non-active list stay selected across the panel's re-renders.
+    chosen = selected_id if any(w["id"] == selected_id for w in watchlists) else None
+    if chosen is None:
+        chosen = next(
+            (w["id"] for w in watchlists if w["is_active"]),
+            watchlists[0]["id"] if watchlists else None,
+        )
+    for w in watchlists:
+        w["is_selected"] = w["id"] == chosen
+    base: dict[str, Any] = {
+        "watchlists": watchlists,
+        "notice": notice,
+        "notice_error": error,
+    }
     try:
         latest = get_latest_screen()
     except Exception:
-        return {"run": None, "rows": [], "load_error": True}
+        return {**base, "run": None, "rows": [], "load_error": True}
     if latest is None:
-        return {"run": None, "rows": [], "load_error": False}
+        return {**base, "run": None, "rows": [], "load_error": False}
 
     crit = latest.criteria
     run_view = {
@@ -508,15 +556,69 @@ def _screen_context() -> dict[str, Any]:
             "avg_volume": _fmt_volume(c.avg_volume),
             "change_pct": _fmt_pct(c.change_pct),
             "change_positive": c.change_pct >= 0,
+            "on_lists": membership.get(c.symbol, []),
         }
         for idx, c in enumerate(latest.matches, start=1)
     ]
-    return {"run": run_view, "rows": rows, "load_error": False}
+    return {**base, "run": run_view, "rows": rows, "load_error": False}
 
 
 @app.get("/api/screen", response_class=HTMLResponse)
-def api_screen(request: Request) -> Any:
-    return templates.TemplateResponse(request, "_screen.html", _screen_context())
+def api_screen(request: Request, watchlist_id: str | None = None) -> Any:
+    return templates.TemplateResponse(
+        request, "_screen.html", _screen_context(selected_id=watchlist_id)
+    )
+
+
+def _add_screen_symbols_to_watchlist(form: dict[str, list[str]]) -> tuple[str, bool]:
+    """Add screener result(s) to a chosen watchlist. Returns (notice, is_error).
+
+    The clicked button supplies ``symbol``: a single ticker, or the sentinel
+    ``__all__`` to add every match from the latest screen.
+    """
+    wid = _watchlist_id_from_form(form)
+    if wid is None:
+        return "Pick a watchlist first.", True
+    try:
+        target = get_watchlist(wid)
+    except Exception:
+        return "Could not read the watchlist.", True
+    if target is None:
+        return "That watchlist no longer exists.", True
+    symbol = (form.get("symbol") or [""])[0].strip()
+    if symbol == "__all__":
+        try:
+            latest = get_latest_screen()
+        except Exception:
+            return "Could not read the latest screen.", True
+        if latest is None or not latest.matches:
+            return "No screen results to add.", True
+        symbols = [c.symbol for c in latest.matches]
+    elif symbol:
+        symbols = [symbol]
+    else:
+        return "No symbol selected.", True
+    try:
+        added = add_symbols(wid, symbols)
+    except ValueError as exc:
+        return str(exc), True
+    except Exception:
+        return "Could not add to the watchlist.", True
+    if not added:
+        return f"Already on {target.name!r} — nothing to add.", False
+    return f"Added {len(added)} symbol(s) to {target.name!r}: {', '.join(added)}.", False
+
+
+@app.post("/api/screen/add-to-watchlist", response_class=HTMLResponse)
+async def api_screen_add_to_watchlist(request: Request) -> Any:
+    form = parse_qs((await request.body()).decode("utf-8"))
+    notice, error = _add_screen_symbols_to_watchlist(form)
+    selected = (form.get("watchlist_id") or [""])[0].strip() or None
+    return templates.TemplateResponse(
+        request,
+        "_screen.html",
+        _screen_context(notice=notice, error=error, selected_id=selected),
+    )
 
 
 def _criteria_form_values(c: ScreenCriteria, lookback: int) -> dict[str, Any]:
@@ -831,83 +933,162 @@ def api_suggest(request: Request) -> Any:
     return templates.TemplateResponse(request, "_suggest.html", _suggest_context())
 
 
-def _watchlist_context(
-    notice: str | None = None, error: bool = False, screen_notice: bool = False
-) -> dict[str, Any]:
-    """Render context for the watchlist panel.
-
-    Defensive — outer-ring; a DB hiccup degrades the panel to a placeholder.
-    """
-    fallback_csv = ", ".join(WATCHLIST)
-    try:
-        active = get_active_watchlist()
-        current: dict[str, Any] | None = None
-        if active is not None:
-            current = {
-                "symbols": active.symbols,
-                "symbols_csv": ", ".join(active.symbols),
-                "source": active.source,
-                "updated_at": active.updated_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
-            }
-
-        screen_symbols: list[str] = []
-        try:
-            latest = get_latest_screen()
-            if latest is not None:
-                screen_symbols = [c.symbol for c in latest.matches]
-        except Exception:
-            pass
-
-    except Exception:
-        return {
-            "load_error": True,
-            "notice": notice,
-            "notice_error": error,
-            "screen_notice": screen_notice,
-            "fallback_csv": fallback_csv,
-        }
-
+def _quote_row(symbol: str, q: QuoteView | None) -> dict[str, Any]:
+    """One symbol's display row for a watchlist quote table."""
     return {
-        "load_error": False,
-        "current": current,
-        "screen_symbols": screen_symbols[:30],
-        "fallback_csv": fallback_csv,
-        "notice": notice,
-        "notice_error": error,
-        "screen_notice": screen_notice,
+        "symbol": symbol,
+        "last": _fmt_money(q.last) if q else "—",
+        "change_pct": _fmt_pct(q.change_pct) if q and q.change_pct is not None else "—",
+        "bid_ask": f"{q.bid:.2f} / {q.ask:.2f}" if q and q.bid and q.ask else "—",
+        "volume": _fmt_volume(int(q.volume)) if q and q.volume is not None else "—",
+        "positive": bool(q and q.change_pct is not None and q.change_pct >= 0),
+        "has_quote": bool(q and q.change_pct is not None),
     }
 
 
-def _save_manual_watchlist(symbols_raw: str) -> tuple[str, bool]:
-    """Parse, normalize and persist a manual watchlist. Returns (notice, is_error)."""
-    symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
-    if not symbols:
-        return "Enter at least one symbol.", True
+def _watchlist_context(notice: str | None = None, error: bool = False) -> dict[str, Any]:
+    """Render context for the watchlist panel: every named watchlist with live
+    quotes, plus management state.
+
+    Defensive — outer-ring; a DB hiccup degrades the panel to a placeholder.
+    """
+    base: dict[str, Any] = {
+        "notice": notice,
+        "notice_error": error,
+        "fallback_csv": ", ".join(WATCHLIST),
+    }
     try:
-        set_watchlist(symbols, source="manual")
-    except ValueError as exc:
-        return str(exc), True
+        records = list_watchlists()
     except Exception:
-        return "Could not save watchlist.", True
-    return f"Watchlist saved with {len(symbols)} symbols.", False
+        return {**base, "load_error": True, "watchlists": [], "has_active": False}
+
+    # One snapshot call for the union of every list's symbols. get_quotes is
+    # outer-ring and never raises — a quote outage degrades rows to "—".
+    union: list[str] = []
+    seen: set[str] = set()
+    for r in records:
+        for sym in r.symbols:
+            if sym not in seen:
+                seen.add(sym)
+                union.append(sym)
+    quotes = get_quotes(union)
+
+    watchlists = [
+        {
+            "id": str(r.id),
+            "name": r.name,
+            "is_active": r.is_active,
+            "source": r.source,
+            "count": len(r.symbols),
+            "symbols_csv": ", ".join(r.symbols),
+            "updated_at": r.updated_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
+            "rows": [_quote_row(sym, quotes.get(sym)) for sym in r.symbols],
+        }
+        for r in records
+    ]
+    return {
+        **base,
+        "load_error": False,
+        "watchlists": watchlists,
+        "has_active": any(r.is_active for r in records),
+    }
 
 
-def _promote_screener_watchlist() -> tuple[str, bool]:
-    """Promote the latest screener results into the active watchlist. Returns (notice, is_error)."""
+def _watchlist_id_from_form(form: dict[str, list[str]]) -> uuid.UUID | None:
+    raw = (form.get("watchlist_id") or [""])[0].strip()
     try:
-        latest = get_latest_screen()
-    except Exception:
-        return "Could not read screener results.", True
-    if latest is None or not latest.matches:
-        return "No screener results to promote.", True
-    symbols = [c.symbol for c in latest.matches]
-    try:
-        set_watchlist(symbols, source="screener")
-    except ValueError as exc:
-        return str(exc), True
-    except Exception:
-        return "Could not save watchlist.", True
-    return f"Promoted {len(symbols)} symbols from the latest screen.", False
+        return uuid.UUID(raw)
+    except ValueError:
+        return None
+
+
+def _parse_symbol_list(raw: str) -> list[str]:
+    """Split a free-text symbol field on commas or whitespace."""
+    return [tok for tok in raw.replace(",", " ").split() if tok]
+
+
+def _do_watchlist_action(action: str, form: dict[str, list[str]]) -> tuple[str, bool]:
+    """Execute one watchlist management action. Returns (notice, is_error)."""
+    if action == "create":
+        name = (form.get("name") or [""])[0].strip()
+        if not name:
+            return "Give the watchlist a name.", True
+        try:
+            create_watchlist(name, source="manual")
+        except ValueError as exc:
+            return str(exc), True
+        except Exception:
+            return "Could not create the watchlist.", True
+        return f"Watchlist {name!r} created.", False
+
+    wid = _watchlist_id_from_form(form)
+    if wid is None:
+        return "No watchlist selected.", True
+
+    if action == "activate":
+        try:
+            activate_watchlist(wid)
+        except ValueError as exc:
+            return str(exc), True
+        except Exception:
+            return "Could not activate that watchlist.", True
+        return "Watchlist activated — runners will use it.", False
+
+    if action == "delete":
+        try:
+            delete_watchlist(wid)
+        except ValueError as exc:
+            return str(exc), True
+        except Exception:
+            return "Could not delete that watchlist.", True
+        return "Watchlist deleted.", False
+
+    if action == "rename":
+        try:
+            rename_watchlist(wid, (form.get("name") or [""])[0])
+        except ValueError as exc:
+            return str(exc), True
+        except Exception:
+            return "Could not rename the watchlist.", True
+        return "Watchlist renamed.", False
+
+    if action == "add_symbols":
+        symbols = _parse_symbol_list((form.get("symbols") or [""])[0])
+        if not symbols:
+            return "Enter at least one symbol to add.", True
+        try:
+            added = add_symbols(wid, symbols)
+        except ValueError as exc:
+            return str(exc), True
+        except Exception:
+            return "Could not add symbols.", True
+        if not added:
+            return "Those symbols are already on the list.", False
+        return f"Added {len(added)} symbol(s): {', '.join(added)}.", False
+
+    if action == "set_symbols":
+        symbols = _parse_symbol_list((form.get("symbols") or [""])[0])
+        try:
+            set_watchlist_symbols(wid, symbols)
+        except ValueError as exc:
+            return str(exc), True
+        except Exception:
+            return "Could not update symbols.", True
+        return f"Watchlist replaced with {len(symbols)} symbol(s).", False
+
+    if action == "remove_symbol":
+        symbol = (form.get("symbol") or [""])[0].strip().upper()
+        if not symbol:
+            return "No symbol given.", True
+        try:
+            remove_symbol(wid, symbol)
+        except ValueError as exc:
+            return str(exc), True
+        except Exception:
+            return "Could not remove that symbol.", True
+        return f"Removed {symbol}.", False
+
+    return "Unknown watchlist action.", True
 
 
 @app.get("/api/watchlist", response_class=HTMLResponse)
@@ -918,18 +1099,8 @@ def api_watchlist(request: Request) -> Any:
 @app.post("/api/watchlist", response_class=HTMLResponse)
 async def api_watchlist_save(request: Request) -> Any:
     form = parse_qs((await request.body()).decode("utf-8"))
-    action = (form.get("action") or ["manual"])[0]
-
-    if action == "promote":
-        notice, error = _promote_screener_watchlist()
-        return templates.TemplateResponse(
-            request,
-            "_watchlist.html",
-            _watchlist_context(notice=notice, error=error, screen_notice=True),
-        )
-
-    symbols_raw = (form.get("symbols") or [""])[0]
-    notice, error = _save_manual_watchlist(symbols_raw)
+    action = (form.get("action") or [""])[0]
+    notice, error = _do_watchlist_action(action, form)
     return templates.TemplateResponse(
         request, "_watchlist.html", _watchlist_context(notice=notice, error=error)
     )

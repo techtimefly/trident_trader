@@ -29,31 +29,75 @@
     </div>
 </div>
 
-{% if rows %}
-<div class="max-h-96 overflow-y-auto">
-<table class="tt mono text-sm">
-    <thead class="sticky top-0 bg-[var(--panel)]">
-        <tr>
-            <th>#</th>
-            <th>Symbol</th>
-            <th>Price</th>
-            <th>Avg Vol</th>
-            <th>Change %</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for r in rows %}
-        <tr>
-            <td class="dim">{{ r.rank }}</td>
-            <td class="font-semibold">{{ r.symbol }}</td>
-            <td>{{ r.price }}</td>
-            <td>{{ r.avg_volume }}</td>
-            <td class="{{ 'pos' if r.change_positive else 'neg' }}">{{ r.change_pct }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+{% if notice %}
+<div class="px-5 py-2 border-b border-[var(--border)]">
+    <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
 </div>
+{% endif %}
+
+{% if rows %}
+<form hx-post="/api/screen/add-to-watchlist" hx-target="#screen" hx-swap="innerHTML">
+    {% if watchlists %}
+    <div class="px-5 py-2 flex flex-wrap items-center gap-2 border-b border-[var(--border)]">
+        <label class="text-xs dim uppercase tracking-widest">Add to watchlist</label>
+        <select name="watchlist_id" id="screen-watchlist-select"
+                class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1">
+            {% for w in watchlists %}
+            <option value="{{ w.id }}" {% if w.is_selected %}selected{% endif %}>
+                {{ w.name }}{% if w.is_active %} (active){% endif %}
+            </option>
+            {% endfor %}
+        </select>
+        <button class="btn btn-ghost text-xs" type="submit" name="symbol" value="__all__">
+            Add all {{ rows | length }} matches
+        </button>
+    </div>
+    {% else %}
+    <div class="px-5 py-2 text-xs dim border-b border-[var(--border)]">
+        Create a watchlist to add screener results to it.
+    </div>
+    {% endif %}
+    <div class="max-h-96 overflow-y-auto">
+    <table class="tt mono text-sm">
+        <thead class="sticky top-0 bg-[var(--panel)]">
+            <tr>
+                <th>#</th>
+                <th>Symbol</th>
+                <th>Price</th>
+                <th>Avg Vol</th>
+                <th>Change %</th>
+                {% if watchlists %}<th>On watchlists</th><th></th>{% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td class="dim">{{ r.rank }}</td>
+                <td class="font-semibold">{{ r.symbol }}</td>
+                <td>{{ r.price }}</td>
+                <td>{{ r.avg_volume }}</td>
+                <td class="{{ 'pos' if r.change_positive else 'neg' }}">{{ r.change_pct }}</td>
+                {% if watchlists %}
+                <td>
+                    {% if r.on_lists %}
+                    {% for name in r.on_lists %}
+                    <span class="pill pill-green text-xs" title="already on {{ name }}">{{ name }}</span>
+                    {% endfor %}
+                    {% else %}
+                    <span class="dim">&mdash;</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <button class="btn btn-ghost text-xs" type="submit"
+                            name="symbol" value="{{ r.symbol }}">+ Add</button>
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</form>
 {% else %}
 <div class="empty">The latest screen matched no symbols. Loosen the filters and re-run.</div>
 {% endif %}

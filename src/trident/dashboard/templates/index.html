@@ -101,7 +101,7 @@
                 <div>
                     <div class="nav-group px-2 mb-1">Plan</div>
                     <a class="nav-link" href="#panel-daily-plan">Today's plan</a>
-                    <a class="nav-link" href="#panel-watchlist">Watchlist</a>
+                    <a class="nav-link" href="#panel-watchlist">Watchlists</a>
                 </div>
                 <div>
                     <div class="nav-group px-2 mb-1">Live trading</div>
@@ -158,8 +158,8 @@
         <section id="panel-watchlist" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
-                    <h2 class="text-sm font-semibold tracking-tight">Watchlist</h2>
-                    <span class="pill pill-dim">symbols &middot; manual &amp; screener</span>
+                    <h2 class="text-sm font-semibold tracking-tight">Watchlists</h2>
+                    <span class="pill pill-dim">named lists &middot; the active one trades</span>
                 </div>
             </div>
             <div
@@ -311,6 +311,7 @@
                 id="screen"
                 hx-get="/api/screen"
                 hx-trigger="load, every 30s"
+                hx-include="#screen-watchlist-select"
                 hx-swap="innerHTML">
                 <div class="skeleton h-32 m-4 rounded-md"></div>
             </div>

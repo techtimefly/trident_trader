@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A personal automated day-trading bot. **Paper trading only.** Single user, single
-watchlist, intentionally minimal — the README is for humans setting up the project;
+A personal automated day-trading bot. **Paper trading only.** Single user,
+intentionally minimal — the README is for humans setting up the project;
 this file is for agents changing it. The win conditions are correctness and
 discipline, not feature breadth or returns.
 
@@ -109,11 +109,17 @@ There is no `live_run.py`. Do not create one without explicit direction.
   state, write a new event.
 - The **kill switch** lives in the `system_state` table; the dashboard toggles it
   and the runner reads it before every gate evaluation, no restart needed.
-- The **watchlist is owned by `src/trident/watchlist.py`.** Runners call
-  `resolve_watchlist()`, which reads the most-recently-activated row from the
-  `watchlists` table and falls back to the static `WATCHLIST` constant if no active
-  row exists (never resolves to empty). The dashboard's `/api/watchlist` panel
-  edits it.
+- **Watchlists are multiple and named.** Several named watchlists coexist in the
+  `watchlists` table (unique `name`); exactly one is `is_active`. CRUD lives in
+  `src/trident/persistence/watchlist_store.py` (`create_watchlist`,
+  `rename_watchlist`, `delete_watchlist`, `activate_watchlist`, `add_symbols`,
+  `remove_symbol`, `set_watchlist_symbols`, `list_watchlists`, `get_watchlist`,
+  `get_active_watchlist`). Runners call `resolve_watchlist()` in
+  `src/trident/watchlist.py`, which reads the **active** watchlist and falls back to
+  the static `WATCHLIST` constant if no active row exists, the active list is
+  empty, or the DB is unavailable (never resolves to empty). The dashboard's
+  `/api/watchlist` panel manages every named list; the screener can add results to
+  any of them.
 
 ## Common commands
 

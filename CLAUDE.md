@@ -70,7 +70,7 @@ optional `manage()` method, translating `ManagementAction`s into broker calls.
 - **Middle ring — failures degrade the product, not capital.**
   `src/trident/strategies/`, `src/trident/data/`, `src/trident/persistence/`.
 - **Outer ring — can fail without losing money.** `src/trident/dashboard/`,
-  `src/trident/backtest/`.
+  `src/trident/backtest/`, `src/trident/screener/`, `src/trident/suggest/`.
 
 `src/trident/risk/gate.py` is the single most important file: a pure function,
 first-failure short-circuit, reject-on-doubt. Every branch is unit-tested. Change
@@ -155,7 +155,7 @@ exist".
 
 ## Test policy
 
-- ~319 unit tests; they run in <1s and need no network or database.
+- 353 unit tests; they run in <1s and need no network or database.
 - Risk gate, position sizing, ORB, EOD timing, and the fill simulator have
   exhaustive branch coverage.
 - Inner-ring code (gate, execution, safety, portfolio) must ship with tests in the
@@ -181,6 +181,11 @@ exist".
 6. **Notional cap sizes down, doesn't reject.** When the risk-budget share count
    exceeds the `max_position_notional_pct` cap, take `min(by_risk, by_notional)`.
    Reject only if even one share blows the cap.
+7. **FMP apikey leaks into logs via httpx.** FMP authenticates with an `?apikey=`
+   query parameter. `httpx` logs every request at INFO, which would write the key
+   in plaintext. `audit/log.py`'s `configure_logging()` raises the `httpx` logger
+   to WARNING; any new logging setup must preserve this. The FMP integration in
+   `screener/fmp.py` is the only place that calls FMP.
 
 ## Style & conventions
 

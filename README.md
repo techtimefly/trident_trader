@@ -186,12 +186,14 @@ src/trident/
   execution/           # Broker protocol + Alpaca adapter + bracket/single-leg orders
   portfolio/           # order tracking + position reconciliation + management
   accounting/          # pure round-trip + wash-sale computation
-  screener/            # stock-screener criteria + filter/rank engine
+  screener/            # stock-screener: criteria, engine, FMP universe layer,
+                       #   managed presets (fmp.py, presets.py, data.py, …)
   suggest/             # AI pre-market stock suggestions
   safety/              # EOD flatten
   backtest/            # fill simulator + honest backtest + strategy comparison
   audit/               # append-only event log + structured logging
-  persistence/         # SQLAlchemy models + migrations + kill switch state
+  persistence/         # SQLAlchemy models + migrations + kill switch state +
+                       #   screen_presets_store.py, watchlist_store.py, …
   dashboard/           # FastAPI + HTMX dashboard (localhost only)
 tests/unit/            # pure-function tests for the safety-critical code
 scripts/               # smoke_test, shadow_run, replay, backtest, compare,

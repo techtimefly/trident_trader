@@ -1,0 +1,42 @@
+{% set bot_label = bot.label %}
+<div class="flex items-center gap-3 text-sm flex-wrap">
+    <span class="mono font-semibold">{{ equity_fmt }}</span>
+    <span class="dim text-xs">&middot;</span>
+    <span class="flex items-center gap-1.5">
+        {% if market_open %}
+            <span class="dot dot-green"></span>
+            <span>Open</span>
+        {% else %}
+            <span class="dot dot-dim"></span>
+            <span class="dim">Closed</span>
+        {% endif %}
+    </span>
+    <span class="dim text-xs">&middot;</span>
+    <span class="flex items-center gap-1.5">
+        {% if bot_label == "running" %}
+            <span class="dot dot-green"></span>
+            <span>Bot running</span>
+        {% elif bot_label == "stale" %}
+            <span class="dot dot-amber"></span>
+            <span class="text-[var(--amber)]">Bot stale</span>
+        {% else %}
+            <span class="dot dot-dim"></span>
+            <span class="dim">Bot idle</span>
+        {% endif %}
+    </span>
+    <span class="dim text-xs">&middot;</span>
+    <span class="mono text-xs dim">{{ et_now }}</span>
+    <div class="ml-auto flex items-center gap-2">
+        {% if kill %}
+            <span class="pill pill-red"><span class="dot dot-red"></span> Kill engaged</span>
+            <form hx-post="/api/kill/release" hx-target="#hero-bar" hx-swap="innerHTML" class="inline">
+                <button class="btn btn-ghost text-xs" style="padding: 0.25rem 0.6rem;" type="submit">Release</button>
+            </form>
+        {% else %}
+            <span class="pill pill-dim">kill armed</span>
+            <form hx-post="/api/kill" hx-target="#hero-bar" hx-swap="innerHTML" class="inline">
+                <button class="btn btn-danger text-xs" style="padding: 0.25rem 0.6rem;" type="submit">Engage kill</button>
+            </form>
+        {% endif %}
+    </div>
+</div>

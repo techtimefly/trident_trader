@@ -80,6 +80,10 @@ it carefully.
 
 - `scripts/shadow_run.py` — live data, signals + gate evaluated, **never submits
   orders**.
+- `scripts/run_shadow_scheduled.sh` — cron launcher for `shadow_run.py`. Guards
+  against weekends, NYSE holidays, duplicate starts, and Postgres being down. Runs
+  for up to 7 hours then exits via SIGTERM. Note: Debian vixie-cron ignores
+  `CRON_TZ` for scheduling; the cron entry time must be server-local, not ET.
 - `scripts/paper_run.py` — submits bracket orders to the **paper** account. Refuses
   non-paper Alpaca URLs at construction (`AlpacaBroker.__init__`).
 - `scripts/deadman.py` — a **separate process** (intentionally not in-process with
@@ -125,7 +129,7 @@ There is no `live_run.py`. Do not create one without explicit direction.
 
 ```bash
 # Setup (one-time)
-docker-compose up -d postgres
+docker compose up -d postgres
 pip install -e ".[dev]"
 alembic upgrade head
 
@@ -187,18 +191,24 @@ exist".
 6. **Notional cap sizes down, doesn't reject.** When the risk-budget share count
    exceeds the `max_position_notional_pct` cap, take `min(by_risk, by_notional)`.
    Reject only if even one share blows the cap.
-7. **FMP apikey leaks into logs via httpx.** FMP authenticates with an `?apikey=`
+7. **Dashboard settings panel writes `.env` directly.** `src/trident/dashboard/settings_io.py`
+   (`rewrite_env`) edits the project `.env` in-place. The settings endpoint calls
+   `get_settings.cache_clear()` so the panel re-renders with fresh values, but
+   runners and the dashboard process itself only pick up the changes on the next
+   restart. API key, feed, and operational fields require a restart; risk and
+   backtest-cost fields take effect immediately on the next gate evaluation.
+8. **FMP apikey leaks into logs via httpx.** FMP authenticates with an `?apikey=`
    query parameter. `httpx` logs every request at INFO, which would write the key
    in plaintext. `audit/log.py`'s `configure_logging()` raises the `httpx` logger
    to WARNING; any new logging setup must preserve this. The FMP integration in
    `screener/fmp.py` is the only place that calls FMP.
-8. **AI suggestion credentials — two paths.** `suggest/client.py` accepts either
+9. **AI suggestion credentials — two paths.** `suggest/client.py` accepts either
    `ANTHROPIC_API_KEY` (pay-per-token) or `CLAUDE_CODE_OAUTH_TOKEN` (Claude Code
    subscription). If neither is set the feature degrades gracefully (not-ok result,
    no crash). The SDK does not read `CLAUDE_CODE_OAUTH_TOKEN` natively; the client
    passes it explicitly as `auth_token`. Never put model identifiers in docs or
    committed files.
-9. **SIGTERM shutdown needs `feed.stop()`.** Cancelling the `feed_task` directly
+10. **SIGTERM shutdown needs `feed.stop()`.** Cancelling the `feed_task` directly
    leaves alpaca-py's `_run_forever` loop running and `asyncio.run()` hanging.
    Always call `await feed.stop()` (uses `stop_ws()`) before cancelling other tasks;
    both `shadow_run.py` and `paper_run.py` follow this order.

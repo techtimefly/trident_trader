@@ -10,6 +10,7 @@ Run with:
 from __future__ import annotations
 
 import contextlib
+import json
 import threading
 import uuid
 from dataclasses import replace
@@ -17,13 +18,13 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from trident.audit.log import configure_logging, get_logger
 from trident.clock import ET, is_market_open, now_et, nth_business_day_back
@@ -33,6 +34,7 @@ from trident.dashboard.alpaca_view import (
     get_quotes,
     list_positions,
 )
+from trident.dashboard.settings_io import rewrite_env
 from trident.persistence.daily_plan import (
     day_trades_in_window,
     get_for_day,
@@ -82,6 +84,8 @@ from trident.screener.presets import (
     DEFAULT_LOOKBACK_DAYS,
     resolve_screen_criteria,
 )
+from trident.settings import get_settings
+from trident.strategies.registry import available_strategies
 from trident.suggest.client import suggest_stocks
 from trident.suggest.persistence import get_latest_suggestions, save_suggestions
 from trident.suggest.suggestion import PlanContext
@@ -130,7 +134,32 @@ def _bot_status() -> dict[str, Any]:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> Any:
-    return templates.TemplateResponse(request, "index.html", {})
+    return templates.TemplateResponse(request, "trading.html", {"active_page": "trading"})
+
+
+@app.get("/plan", response_class=HTMLResponse)
+def plan_page(request: Request) -> Any:
+    return templates.TemplateResponse(request, "plan.html", {"active_page": "plan"})
+
+
+@app.get("/screener", response_class=HTMLResponse)
+def screener_page(request: Request) -> Any:
+    return templates.TemplateResponse(request, "screener.html", {"active_page": "screener"})
+
+
+@app.get("/research", response_class=HTMLResponse)
+def research_page(request: Request) -> Any:
+    return templates.TemplateResponse(request, "research.html", {"active_page": "research"})
+
+
+@app.get("/system", response_class=HTMLResponse)
+def system_page(request: Request) -> Any:
+    return templates.TemplateResponse(request, "system.html", {"active_page": "system"})
+
+
+@app.get("/api/hero-mini", response_class=HTMLResponse)
+def api_hero_mini(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_hero_mini.html", _hero_mini_context())
 
 
 @app.get("/api/hero", response_class=HTMLResponse)
@@ -261,16 +290,33 @@ def _summarize_payload(payload: dict[str, Any]) -> str:
     return " ".join(pieces) or str(payload)[:100]
 
 
-@app.post("/api/kill", response_class=JSONResponse)
-def api_kill_engage() -> Any:
+def _hero_mini_context() -> dict[str, Any]:
+    account = get_account()
+    return {
+        "account": account,
+        "equity_fmt": _fmt_money(account.equity) if account else "—",
+        "market_open": is_market_open(),
+        "et_now": now_et().strftime("%H:%M ET • %a %b %d"),
+        "bot": _bot_status(),
+        "kill": kill_switch_engaged(),
+    }
+
+
+@app.get("/api/hero-bar", response_class=HTMLResponse)
+def api_hero_bar(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_hero_bar.html", _hero_mini_context())
+
+
+@app.post("/api/kill", response_class=HTMLResponse)
+def api_kill_engage(request: Request) -> Any:
     set_kill_switch(True, actor="dashboard")
-    return {"engaged": True}
+    return templates.TemplateResponse(request, "_hero_bar.html", _hero_mini_context())
 
 
-@app.post("/api/kill/release", response_class=JSONResponse)
-def api_kill_release() -> Any:
+@app.post("/api/kill/release", response_class=HTMLResponse)
+def api_kill_release(request: Request) -> Any:
     set_kill_switch(False, actor="dashboard")
-    return {"engaged": False}
+    return templates.TemplateResponse(request, "_hero_bar.html", _hero_mini_context())
 
 
 def _daily_plan_context(notice: str | None = None, error: bool = False) -> dict[str, Any]:
@@ -1344,3 +1390,280 @@ async def api_manage_action(request: Request) -> Any:
     return templates.TemplateResponse(
         request, "_manage.html", _manage_context(notice=notice, error=error)
     )
+
+
+# ---------------------------------------------------------------------------
+# Settings panel
+# ---------------------------------------------------------------------------
+
+def _key_status(val: str) -> dict[str, object]:
+    """Produce display metadata for a secret key without exposing the value."""
+    configured = bool(val and val.strip())
+    hint = f"…{val[-4:]}" if configured and len(val) >= 4 else ""
+    return {"configured": configured, "hint": hint}
+
+
+def _db_display(url: str) -> str:
+    """Return host:port/dbname from a database URL, hiding credentials."""
+    try:
+        p = urlparse(url)
+        host = p.hostname or "?"
+        port = f":{p.port}" if p.port else ""
+        db = p.path.lstrip("/") or "?"
+        return f"{host}{port}/{db}"
+    except Exception:
+        return "configured"
+
+
+def _settings_context(notice: str | None = None, error: bool = False) -> dict[str, Any]:
+    s = get_settings()
+    return {
+        "notice": notice,
+        "notice_error": error,
+        # API key statuses only — values never reach the template
+        "alpaca_key": _key_status(s.alpaca_api_key),
+        "alpaca_secret": _key_status(s.alpaca_api_secret),
+        "anthropic_key": _key_status(s.anthropic_api_key),
+        "fmp_key": _key_status(s.fmp_api_key),
+        # Non-secret connection fields
+        "alpaca_base_url": s.alpaca_base_url,
+        "alpaca_data_feed": s.alpaca_data_feed,
+        "is_paper": s.is_paper,
+        # Risk
+        "risk_per_trade_pct": _plain_decimal(s.risk_per_trade_pct),
+        "daily_loss_limit_pct": _plain_decimal(s.daily_loss_limit_pct),
+        "max_concurrent_positions": str(s.max_concurrent_positions),
+        "account_equity_override": _plain_decimal(s.account_equity_override) if s.account_equity_override else "",
+        # Operational
+        "environment": s.environment,
+        "log_level": s.log_level,
+        "default_strategy": s.default_strategy,
+        "available_strategies": available_strategies(),
+        # Backtest costs
+        "backtest_slippage_bps": _plain_decimal(s.backtest_slippage_bps),
+        "backtest_fee_per_share": _plain_decimal(s.backtest_fee_per_share),
+        "backtest_min_fee": _plain_decimal(s.backtest_min_fee),
+        "backtest_sec_fee_rate": _plain_decimal(s.backtest_sec_fee_rate),
+        "backtest_taf_per_share": _plain_decimal(s.backtest_taf_per_share),
+        # DB — read-only display
+        "db_display": _db_display(s.database_url),
+    }
+
+
+_RESTART_KEYS = frozenset({
+    "ALPACA_API_KEY", "ALPACA_API_SECRET", "ALPACA_BASE_URL", "ALPACA_DATA_FEED",
+    "ANTHROPIC_API_KEY", "FMP_API_KEY", "ENVIRONMENT", "LOG_LEVEL",
+})
+
+
+def _save_settings(form: dict[str, list[str]]) -> tuple[str, bool]:
+    """Parse, validate and persist settings to .env. Returns (notice, is_error)."""
+    from decimal import InvalidOperation
+
+    updates: dict[str, str] = {}
+
+    # API keys — only write if the user supplied a non-blank value
+    for env_key, form_key in (
+        ("ALPACA_API_KEY", "alpaca_api_key"),
+        ("ALPACA_API_SECRET", "alpaca_api_secret"),
+        ("ANTHROPIC_API_KEY", "anthropic_api_key"),
+        ("FMP_API_KEY", "fmp_api_key"),
+    ):
+        val = (form.get(form_key) or [""])[0].strip()
+        if val:
+            updates[env_key] = val
+
+    base_url = (form.get("alpaca_base_url") or [""])[0].strip()
+    if base_url:
+        updates["ALPACA_BASE_URL"] = base_url
+
+    feed = (form.get("alpaca_data_feed") or [""])[0].strip()
+    if feed in ("iex", "sip"):
+        updates["ALPACA_DATA_FEED"] = feed
+
+    # Risk params — validate then write
+    try:
+        rpt_raw = (form.get("risk_per_trade_pct") or [""])[0].strip()
+        dll_raw = (form.get("daily_loss_limit_pct") or [""])[0].strip()
+        mcp_raw = (form.get("max_concurrent_positions") or [""])[0].strip()
+        aeo_raw = (form.get("account_equity_override") or [""])[0].strip()
+
+        if rpt_raw:
+            v = Decimal(rpt_raw)
+            if not (Decimal("0") < v <= Decimal("100")):
+                return "Risk per trade must be between 0 and 100.", True
+            updates["RISK_PER_TRADE_PCT"] = rpt_raw
+        if dll_raw:
+            v = Decimal(dll_raw)
+            if not (Decimal("0") < v <= Decimal("100")):
+                return "Daily loss limit must be between 0 and 100.", True
+            updates["DAILY_LOSS_LIMIT_PCT"] = dll_raw
+        if mcp_raw:
+            v_int = int(mcp_raw)
+            if v_int < 1:
+                return "Max concurrent positions must be at least 1.", True
+            updates["MAX_CONCURRENT_POSITIONS"] = mcp_raw
+        # blank equity override means "clear it"
+        updates["ACCOUNT_EQUITY_OVERRIDE"] = aeo_raw
+    except (ValueError, InvalidOperation):
+        return "Could not parse risk parameters — check the numbers.", True
+
+    # Operational
+    env = (form.get("environment") or [""])[0].strip()
+    if env in ("development", "paper"):
+        updates["ENVIRONMENT"] = env
+
+    log_level = (form.get("log_level") or [""])[0].strip()
+    if log_level in ("DEBUG", "INFO", "WARNING", "ERROR"):
+        updates["LOG_LEVEL"] = log_level
+
+    strategy = (form.get("default_strategy") or [""])[0].strip()
+    if strategy:
+        updates["DEFAULT_STRATEGY"] = strategy
+
+    # Backtest costs
+    try:
+        for env_key, form_key in (
+            ("BACKTEST_SLIPPAGE_BPS", "backtest_slippage_bps"),
+            ("BACKTEST_FEE_PER_SHARE", "backtest_fee_per_share"),
+            ("BACKTEST_MIN_FEE", "backtest_min_fee"),
+            ("BACKTEST_SEC_FEE_RATE", "backtest_sec_fee_rate"),
+            ("BACKTEST_TAF_PER_SHARE", "backtest_taf_per_share"),
+        ):
+            val = (form.get(form_key) or [""])[0].strip()
+            if val:
+                v = Decimal(val)
+                if v < 0:
+                    return f"{form_key.replace('_', ' ').title()} cannot be negative.", True
+                updates[env_key] = val
+    except (ValueError, InvalidOperation):
+        return "Could not parse backtest cost parameters — check the numbers.", True
+
+    try:
+        rewrite_env(updates)
+    except Exception:
+        return "Could not write to .env — check file permissions.", True
+
+    # Invalidate the cached settings so the panel re-renders with fresh values
+    get_settings.cache_clear()
+
+    needs_restart = bool(updates.keys() & _RESTART_KEYS)
+    if needs_restart:
+        return "Settings saved — restart runners and the dashboard to apply API / operational changes.", False
+    return "Settings saved.", False
+
+
+@app.get("/api/settings", response_class=HTMLResponse)
+def api_settings(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_settings.html", _settings_context())
+
+
+@app.post("/api/settings", response_class=HTMLResponse)
+async def api_settings_save(request: Request) -> Any:
+    form = parse_qs((await request.body()).decode("utf-8"))
+    notice, error = _save_settings(form)
+    return templates.TemplateResponse(
+        request, "_settings.html", _settings_context(notice=notice, error=error)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Connection health panel
+# ---------------------------------------------------------------------------
+
+def _health_context() -> dict[str, Any]:
+    """Check live connectivity to Alpaca, FMP, and the database.
+
+    Outer-ring: every check is isolated so one failure doesn't block others.
+    """
+    s = get_settings()
+
+    # ── Alpaca ──────────────────────────────────────────────────────────────
+    if not s.alpaca_api_key or not s.alpaca_api_secret:
+        alpaca: dict[str, str] = {"status": "unconfigured", "detail": "API key / secret not set"}
+    else:
+        account = get_account()
+        if account is not None:
+            alpaca = {
+                "status": "ok",
+                "detail": f"account {account.status} · equity {_fmt_money(account.equity)}",
+            }
+        else:
+            alpaca = {"status": "error", "detail": "authentication failed or unreachable"}
+
+    # ── FMP ─────────────────────────────────────────────────────────────────
+    if is_configured():
+        fmp: dict[str, str] = {"status": "ok", "detail": "key configured"}
+    else:
+        fmp = {"status": "unconfigured", "detail": "key not set — market-cap / sector filters disabled"}
+
+    # ── Database ─────────────────────────────────────────────────────────────
+    try:
+        with session_scope() as db_s:
+            db_s.execute(text("SELECT 1"))
+        db: dict[str, str] = {"status": "ok", "detail": "connected"}
+    except Exception as exc:
+        db = {"status": "error", "detail": str(exc)[:120]}
+
+    return {"alpaca": alpaca, "fmp": fmp, "db": db}
+
+
+@app.get("/api/health", response_class=HTMLResponse)
+def api_health(request: Request) -> Any:
+    return templates.TemplateResponse(request, "_health.html", _health_context())
+
+
+# ---------------------------------------------------------------------------
+# Log tail panel
+# ---------------------------------------------------------------------------
+
+def _parse_log_line(raw: str) -> dict[str, str]:
+    """Return a display dict for one log line, parsing JSON where possible."""
+    raw = raw.strip()
+    try:
+        obj = json.loads(raw)
+        ts = str(obj.get("timestamp", ""))[:19].replace("T", " ")
+        level = str(obj.get("level", "")).lower()
+        event = str(obj.get("event", raw))
+        # Include the most useful extra fields without overwhelming the display
+        extras = {
+            k: obj[k]
+            for k in ("symbol", "strategy", "reason", "error", "matched", "count")
+            if k in obj and obj[k] is not None
+        }
+        detail = "  ".join(f"{k}={v}" for k, v in extras.items())
+        return {"ts": ts, "level": level, "event": event, "detail": detail, "is_json": "1"}
+    except (json.JSONDecodeError, ValueError):
+        return {"ts": "", "level": "", "event": raw, "detail": "", "is_json": ""}
+
+
+def _tail_file(path: Path, n: int) -> list[dict[str, str]]:
+    content = path.read_text(encoding="utf-8", errors="replace")
+    return [_parse_log_line(ln) for ln in content.splitlines()[-n:] if ln.strip()]
+
+
+def _log_context(selected: str | None = None) -> dict[str, Any]:
+    log_dir = get_settings().log_dir.resolve()
+    try:
+        files = sorted(log_dir.glob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
+    except Exception:
+        return {"files": [], "selected": None, "lines": [], "load_error": True}
+
+    file_names = [f.name for f in files]
+    if not file_names:
+        return {"files": [], "selected": None, "lines": [], "load_error": False}
+
+    # Use the requested file if valid, else the most-recently-modified one
+    target_name = selected if selected and selected in file_names else file_names[0]
+
+    try:
+        lines = _tail_file(log_dir / target_name, 50)
+    except Exception:
+        lines = []
+
+    return {"files": file_names, "selected": target_name, "lines": lines, "load_error": False}
+
+
+@app.get("/api/logs", response_class=HTMLResponse)
+def api_logs(request: Request, file: str | None = None) -> Any:
+    return templates.TemplateResponse(request, "_logs.html", _log_context(selected=file))

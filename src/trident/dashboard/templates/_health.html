@@ -1,0 +1,28 @@
+<div class="p-5 space-y-4">
+
+    <div class="space-y-2">
+
+        {% for svc, label in [('alpaca', 'Alpaca'), ('fmp', 'FMP'), ('db', 'Database')] %}
+        {% set item = {'alpaca': alpaca, 'fmp': fmp, 'db': db}[svc] %}
+        <div class="flex items-center gap-3 border border-[var(--border)] rounded px-3 py-2.5">
+            {% if item.status == 'ok' %}
+            <span class="dot dot-green shrink-0"></span>
+            {% elif item.status == 'error' %}
+            <span class="dot dot-red shrink-0"></span>
+            {% else %}
+            <span class="dot dot-dim shrink-0"></span>
+            {% endif %}
+            <span class="text-sm font-semibold w-20 shrink-0">{{ label }}</span>
+            <span class="text-sm {% if item.status == 'error' %}neg{% elif item.status == 'unconfigured' %}dim{% endif %}">
+                {{ item.detail }}
+            </span>
+        </div>
+        {% endfor %}
+
+    </div>
+
+    <form hx-get="/api/health" hx-target="#health" hx-swap="innerHTML">
+        <button class="btn btn-ghost text-sm" type="submit">Test connections</button>
+    </form>
+
+</div>

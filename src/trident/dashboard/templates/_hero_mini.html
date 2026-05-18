@@ -1,0 +1,41 @@
+<div class="flex items-center gap-3 text-sm flex-wrap">
+    {% if account %}
+    <span class="mono font-medium">{{ equity_fmt }}</span>
+    <span class="dim">·</span>
+    {% endif %}
+    {% if market_open %}
+    <span class="pill pill-green"><span class="dot dot-green"></span> Open</span>
+    {% else %}
+    <span class="pill pill-dim"><span class="dot dot-dim"></span> Closed</span>
+    {% endif %}
+    <span class="dim">·</span>
+    {% if bot.fresh %}
+    <span class="pill pill-green"><span class="dot dot-green"></span> Bot running</span>
+    {% elif bot.label == 'stale' %}
+    <span class="pill pill-amber"><span class="dot dot-amber"></span> Bot stale</span>
+    {% else %}
+    <span class="pill pill-dim"><span class="dot dot-dim"></span> Bot idle</span>
+    {% endif %}
+    <div class="ml-auto flex items-center gap-2">
+        {% if kill %}
+        <span class="pill pill-red"><span class="dot dot-red"></span> Kill engaged</span>
+        <button class="btn btn-ghost"
+                style="padding: 0.2rem 0.7rem; font-size: 0.75rem;"
+                hx-post="/api/kill/release"
+                hx-target="#header-status"
+                hx-swap="innerHTML"
+                hx-confirm="Release the kill switch and allow new orders?">
+            Release
+        </button>
+        {% else %}
+        <button class="btn btn-danger"
+                style="padding: 0.2rem 0.7rem; font-size: 0.75rem;"
+                hx-post="/api/kill"
+                hx-target="#header-status"
+                hx-swap="innerHTML"
+                hx-confirm="Engage the kill switch? This will block new orders.">
+            Engage kill switch
+        </button>
+        {% endif %}
+    </div>
+</div>

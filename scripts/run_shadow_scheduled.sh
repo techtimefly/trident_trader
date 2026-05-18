@@ -7,7 +7,12 @@
 #
 # Cron entry (install with `crontab -e`):
 #   CRON_TZ=America/New_York
-#   20 9 * * 1-5 /home/hal9000/agent/apps/trident_trader/trident_trader/scripts/run_shadow_scheduled.sh >> /home/hal9000/agent/apps/trident_trader/trident_trader/logs/cron.log 2>&1
+#   20 7 * * 1-5 /home/hal9000/agent/apps/trident_trader/trident_trader/scripts/run_shadow_scheduled.sh >> /home/hal9000/agent/apps/trident_trader/trident_trader/logs/cron.log 2>&1
+#
+# NOTE: This cron daemon (Debian vixie-cron 3.0pl1) ignores CRON_TZ for
+# scheduling — it only sets the env var for the child process. The time above
+# is 07:20 server-local (MDT/MST), which equals 09:20 ET year-round because
+# Mountain and Eastern both observe DST on the same schedule (2h offset).
 #
 # Credentials: the app loads ALPACA_API_KEY / ALPACA_API_SECRET from the project
 # .env file. cron does NOT inherit an interactive shell, so .env must exist.
@@ -20,6 +25,10 @@ cd "$PROJECT_DIR"
 PY="$PROJECT_DIR/.venv/bin/python"
 LOG_DIR="$PROJECT_DIR/logs"; mkdir -p "$LOG_DIR"
 STAMP="$(date +%Y%m%d)"
+
+# Unconditional trace — written before any guard so every cron invocation
+# leaves a record even on skips or early failures.
+echo "$(date -Is) cron fired (pid=$$)" >> "$LOG_DIR/scheduler.log"
 
 # 1. Trading-day guard — skip weekends + NYSE holidays (reuses trident.clock).
 if ! PYTHONPATH=src "$PY" -c "import sys; from datetime import date; \

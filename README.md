@@ -96,9 +96,13 @@ To run it automatically each trading day, install the cron launcher:
 
 ```bash
 crontab -e
-# Add (cron_TZ=America/New_York):
+# Add one line. The time must be in server-local time, not ET:
+# - If the server is in a UTC-offset timezone, compute accordingly.
+# - On this machine (MDT, UTC-6): 07:20 local = 09:20 ET year-round.
+# - The Debian vixie-cron used here ignores CRON_TZ for scheduling;
+#   set the variable anyway so child processes see the correct TZ.
 #   CRON_TZ=America/New_York
-#   20 9 * * 1-5 /absolute/path/to/scripts/run_shadow_scheduled.sh >> logs/cron.log 2>&1
+#   20 7 * * 1-5 /absolute/path/to/scripts/run_shadow_scheduled.sh >> logs/cron.log 2>&1
 ```
 
 `run_shadow_scheduled.sh` guards against weekends, NYSE holidays, duplicate
@@ -165,21 +169,30 @@ In a second terminal:
 PYTHONPATH=src python scripts/run_dashboard.py
 ```
 
-Open <http://127.0.0.1:8765>. The page shows:
-- Account equity, cash, buying power (live from Alpaca).
-- Market open/closed indicator and a heartbeat-based bot status.
-- Open positions in the Alpaca paper account.
-- Today's signals with the gate decision next to each.
-- Watchlists — every named list with live per-symbol quotes (last price, day
-  change, bid/ask, volume from the IEX snapshot feed); add/remove symbols,
+Open <http://127.0.0.1:8765>. The dashboard has five pages reachable from the
+top navigation bar. A persistent status strip on every page shows equity,
+market state, bot heartbeat, and the kill switch.
+
+- **Trading** — open positions, today's signals with gate decisions, today's
+  orders, and manual controls (close a position, adjust a stop, cancel an order).
+- **Plan** — today's capital-budget and day-trade cap; watchlist management.
+  Every named watchlist shows live per-symbol quotes (last price, day change,
+  bid/ask, volume from the IEX snapshot feed); add/remove symbols,
   create/rename/activate/delete lists. The runner trades the active list.
-- AI pre-market check — a **Run pre-market check** button that runs the screener
-  and then asks Claude to review the candidates. Requires `ANTHROPIC_API_KEY` or
-  `CLAUDE_CODE_OAUTH_TOKEN`; degrades gracefully if neither is set.
-- The last 24 hours of audit events.
-- A red **kill switch** button. Engaging it makes the gate reject every new
-  signal until you release it. The toggle is persisted to the `system_state`
-  table so the shadow runner sees it without needing a restart.
+- **Screener** — managed screen-filter presets (editable criteria, activate /
+  delete); latest screen results with an "add to watchlist" action; AI stock
+  suggestions panel with a **Run pre-market check** button. AI suggestions
+  require `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`; degrades gracefully
+  if neither is set.
+- **Research** — per-trade P&L for closed live trades; latest replay run
+  summary and trade list; strategy comparison panel.
+- **System** — settings panel (API keys, risk defaults, operational config,
+  backtest cost model — edits `.env` in-place); connection health (Alpaca, FMP,
+  DB); live log tail; last 24 hours of audit events.
+
+The kill switch on the status strip engages immediately; the gate rejects every
+new signal until it is released. The toggle is persisted to the `system_state`
+table so runners see it without a restart.
 
 The dashboard has no auth. The launcher binds to `0.0.0.0` by default so
 Codespaces / Docker port-forwarding works; on a personal machine set

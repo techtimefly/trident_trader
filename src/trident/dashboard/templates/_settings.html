@@ -1,0 +1,217 @@
+<form hx-post="/api/settings" hx-target="#settings" hx-swap="innerHTML"
+      class="p-5 space-y-7">
+
+    {% if notice %}
+    <div>
+        <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
+    </div>
+    {% endif %}
+
+    <!-- ── API Keys & Connections ────────────────────────────── -->
+    <div class="space-y-4">
+        <div class="text-xs dim uppercase tracking-widest">API keys &amp; connections</div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+            <div class="space-y-1">
+                <label class="text-xs dim block">Alpaca API Key</label>
+                <div class="flex items-center gap-2 mb-1">
+                    {% if alpaca_key.configured %}
+                    <span class="pill pill-green">configured {{ alpaca_key.hint }}</span>
+                    {% else %}
+                    <span class="pill pill-dim">not set</span>
+                    {% endif %}
+                </div>
+                <input type="password" name="alpaca_api_key" autocomplete="off"
+                       placeholder="{{ 'leave blank to keep' if alpaca_key.configured else 'paste key here' }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+
+            <div class="space-y-1">
+                <label class="text-xs dim block">Alpaca API Secret</label>
+                <div class="flex items-center gap-2 mb-1">
+                    {% if alpaca_secret.configured %}
+                    <span class="pill pill-green">configured {{ alpaca_secret.hint }}</span>
+                    {% else %}
+                    <span class="pill pill-dim">not set</span>
+                    {% endif %}
+                </div>
+                <input type="password" name="alpaca_api_secret" autocomplete="off"
+                       placeholder="{{ 'leave blank to keep' if alpaca_secret.configured else 'paste secret here' }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+
+            <div class="space-y-1">
+                <label class="text-xs dim block">Alpaca Base URL</label>
+                <input type="text" name="alpaca_base_url" value="{{ alpaca_base_url }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+                <div class="text-xs dim">
+                    {% if is_paper %}
+                    <span class="dot dot-green inline-block align-middle mr-1"></span> paper account
+                    {% else %}
+                    <span class="dot dot-amber inline-block align-middle mr-1"></span> non-paper URL
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="space-y-1">
+                <label class="text-xs dim block">Data feed</label>
+                <select name="alpaca_data_feed"
+                        class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1.5 w-full">
+                    <option value="iex" {% if alpaca_data_feed == 'iex' %}selected{% endif %}>IEX (free tier)</option>
+                    <option value="sip" {% if alpaca_data_feed == 'sip' %}selected{% endif %}>SIP (paid)</option>
+                </select>
+            </div>
+
+            <div class="space-y-1">
+                <label class="text-xs dim block">Anthropic API Key</label>
+                <div class="flex items-center gap-2 mb-1">
+                    {% if anthropic_key.configured %}
+                    <span class="pill pill-green">configured {{ anthropic_key.hint }}</span>
+                    {% else %}
+                    <span class="pill pill-dim">not set — AI suggestions disabled</span>
+                    {% endif %}
+                </div>
+                <input type="password" name="anthropic_api_key" autocomplete="off"
+                       placeholder="{{ 'leave blank to keep' if anthropic_key.configured else 'paste key here' }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+
+            <div class="space-y-1">
+                <label class="text-xs dim block">FMP API Key</label>
+                <div class="flex items-center gap-2 mb-1">
+                    {% if fmp_key.configured %}
+                    <span class="pill pill-green">configured {{ fmp_key.hint }}</span>
+                    {% else %}
+                    <span class="pill pill-dim">not set — screener uses Alpaca universe</span>
+                    {% endif %}
+                </div>
+                <input type="password" name="fmp_api_key" autocomplete="off"
+                       placeholder="{{ 'leave blank to keep' if fmp_key.configured else 'paste key here' }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ── Risk Defaults ─────────────────────────────────────── -->
+    <div class="border-t border-[var(--border)] pt-5 space-y-3">
+        <div class="text-xs dim uppercase tracking-widest">Risk defaults</div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Risk / trade %</label>
+                <input type="number" name="risk_per_trade_pct" step="0.1" min="0.1" max="100"
+                       value="{{ risk_per_trade_pct }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Daily loss limit %</label>
+                <input type="number" name="daily_loss_limit_pct" step="0.1" min="0.1" max="100"
+                       value="{{ daily_loss_limit_pct }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Max positions</label>
+                <input type="number" name="max_concurrent_positions" step="1" min="1"
+                       value="{{ max_concurrent_positions }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Equity override</label>
+                <input type="number" name="account_equity_override" step="0.01" min="0"
+                       value="{{ account_equity_override }}" placeholder="read from Alpaca"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+        </div>
+        <div class="text-xs dim">These are defaults for the risk gate; today's Plan can impose tighter intraday caps.</div>
+    </div>
+
+    <!-- ── Operational ───────────────────────────────────────── -->
+    <div class="border-t border-[var(--border)] pt-5 space-y-3">
+        <div class="text-xs dim uppercase tracking-widest">Operational</div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Environment</label>
+                <select name="environment"
+                        class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1.5 w-full">
+                    <option value="development" {% if environment == 'development' %}selected{% endif %}>development</option>
+                    <option value="paper" {% if environment == 'paper' %}selected{% endif %}>paper</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Log level</label>
+                <select name="log_level"
+                        class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1.5 w-full">
+                    {% for level in ['DEBUG', 'INFO', 'WARNING', 'ERROR'] %}
+                    <option value="{{ level }}" {% if log_level == level %}selected{% endif %}>{{ level }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Default strategy</label>
+                <select name="default_strategy"
+                        class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1.5 w-full">
+                    {% for s in available_strategies %}
+                    <option value="{{ s }}" {% if default_strategy == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Backtest Cost Model ───────────────────────────────── -->
+    <details class="border-t border-[var(--border)] pt-5">
+        <summary class="text-xs dim uppercase tracking-widest cursor-pointer select-none hover:text-[var(--text)] transition-colors">
+            Backtest cost model
+        </summary>
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-3">
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Slippage (bps)</label>
+                <input type="number" name="backtest_slippage_bps" step="0.1" min="0"
+                       value="{{ backtest_slippage_bps }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Fee / share</label>
+                <input type="number" name="backtest_fee_per_share" step="0.000001" min="0"
+                       value="{{ backtest_fee_per_share }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Min fee</label>
+                <input type="number" name="backtest_min_fee" step="0.01" min="0"
+                       value="{{ backtest_min_fee }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">SEC fee rate</label>
+                <input type="number" name="backtest_sec_fee_rate" step="0.0000001" min="0"
+                       value="{{ backtest_sec_fee_rate }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">TAF / share</label>
+                <input type="number" name="backtest_taf_per_share" step="0.000001" min="0"
+                       value="{{ backtest_taf_per_share }}"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+        </div>
+    </details>
+
+    <!-- ── Database (read-only) ──────────────────────────────── -->
+    <div class="border-t border-[var(--border)] pt-5 flex items-center gap-3">
+        <div class="text-xs dim uppercase tracking-widest shrink-0">Database</div>
+        <span class="mono text-sm dim">{{ db_display }}</span>
+        <span class="text-xs dim">(edit <span class="mono">DATABASE_URL</span> in .env directly)</span>
+    </div>
+
+    <!-- ── Save ──────────────────────────────────────────────── -->
+    <div class="border-t border-[var(--border)] pt-4 flex flex-wrap items-center gap-4">
+        <button class="btn btn-ghost text-sm" type="submit">Save settings</button>
+        <span class="text-xs dim">
+            API key fields left blank are unchanged.
+            API key, feed, and operational changes require a restart to take effect.
+        </span>
+    </div>
+
+</form>

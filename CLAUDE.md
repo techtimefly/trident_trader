@@ -130,8 +130,8 @@ There is no `live_run.py`. Do not create one without explicit direction.
 ```bash
 # Setup (one-time)
 docker compose up -d postgres
-pip install -e ".[dev]"
-alembic upgrade head
+pip install -e ".[dev]"   # also installs the `trident` CLI entry point
+alembic upgrade head      # or: trident db upgrade
 
 # Tests — must pass before any commit; run in <1s, no network/DB needed
 PYTHONPATH=src python -m pytest tests/unit -q
@@ -146,17 +146,50 @@ ruff check src tests
 mypy src
 
 # Smoke test (checks DB + Alpaca credentials; submits nothing)
-PYTHONPATH=src python scripts/smoke_test.py
+PYTHONPATH=src python scripts/smoke_test.py   # or: trident smoke
 
 # Replay historical days (writes to DB; dashboard picks it up)
 PYTHONPATH=src python scripts/replay.py --days 90
 PYTHONPATH=src python scripts/replay.py --date 2026-05-12 --no-persist
+# or: trident replay --days 90
+# or: trident replay --date 2026-05-12 --no-persist
 
 # Shadow runner (live data, no orders)
-PYTHONPATH=src python scripts/shadow_run.py
+PYTHONPATH=src python scripts/shadow_run.py   # or: trident run shadow
 
 # Dashboard (then open http://127.0.0.1:8765)
-PYTHONPATH=src python scripts/run_dashboard.py
+PYTHONPATH=src python scripts/run_dashboard.py   # or: trident run dashboard
+```
+
+The `trident` CLI is a convenience wrapper installed by `pip install -e ".[dev]"`.
+The underlying `scripts/*.py` files are unchanged and still work. Use whichever
+form you prefer; they are equivalent.
+
+Full CLI reference:
+
+```bash
+trident run shadow [--strategy S]       # live data, no orders
+trident run paper  [--strategy S] [-y]  # paper orders (prompts unless -y)
+trident run dashboard                   # FastAPI on :8765
+
+trident replay   [--date D] [--days N] [--equity N] [--strategy S] [--no-persist]
+trident backtest [--date D] [--days N] [--window-days N] [--slippage-bps N] ...
+trident compare  [--date D] [--days N] [--strategy S ...]
+trident screen   [--preset N] [--min-price N] [--max-price N] [--min-change N] ...
+trident suggest  [--max N]
+
+trident smoke                           # DB + Alpaca credential check
+trident status                          # DB / Alpaca / kill switch / watchlist / heartbeat
+
+trident kill-switch on|off              # toggle without the dashboard
+trident watchlist                       # list all named watchlists
+trident watchlist add AAPL NVDA
+trident watchlist remove AAPL
+trident watchlist activate NAME
+trident watchlist create NAME [SYMS...]
+trident watchlist delete NAME
+
+trident db upgrade                      # alembic upgrade head
 ```
 
 After any persistence-model change, run `alembic upgrade head` before restarting

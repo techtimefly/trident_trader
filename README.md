@@ -45,6 +45,8 @@ cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+# This installs the `trident` CLI on PATH. After this you can run
+# `trident <command>` as a shorthand for the scripts (see below).
 ```
 
 ### 3. Postgres
@@ -70,6 +72,8 @@ to avoid docker-compose v1 compatibility issues.
 
 ```bash
 PYTHONPATH=src python scripts/smoke_test.py
+# or equivalently:
+trident smoke
 ```
 
 Expected output (JSON lines): `db_ok`, `alpaca_ok`. If either fails, fix that
@@ -85,6 +89,8 @@ PYTHONPATH=src python scripts/backfill_daily.py 60
 
 ```bash
 PYTHONPATH=src python scripts/shadow_run.py
+# or equivalently:
+trident run shadow
 ```
 
 This connects to Alpaca's WebSocket bar feed during US market hours, runs the
@@ -116,6 +122,11 @@ PYTHONPATH=src python scripts/replay.py                  # yesterday
 PYTHONPATH=src python scripts/replay.py --date 2026-05-12
 PYTHONPATH=src python scripts/replay.py --days 250       # last ~year
 PYTHONPATH=src python scripts/replay.py --days 90 --no-persist   # console-only
+# or equivalently:
+trident replay
+trident replay --date 2026-05-12
+trident replay --days 250
+trident replay --days 90 --no-persist
 ```
 
 Fetches 1-min IEX bars for the chosen day(s), feeds them through the same
@@ -138,6 +149,8 @@ walk-forward) is `scripts/backtest.py`.
 ```bash
 # Terminal A — the runner
 PYTHONPATH=src python scripts/paper_run.py
+# or equivalently:
+trident run paper
 
 # Terminal B — the dead-man's switch (independent process)
 PYTHONPATH=src python scripts/deadman.py
@@ -167,6 +180,8 @@ In a second terminal:
 
 ```bash
 PYTHONPATH=src python scripts/run_dashboard.py
+# or equivalently:
+trident run dashboard
 ```
 
 Open <http://127.0.0.1:8765>. The dashboard has five pages reachable from the
@@ -218,6 +233,37 @@ pytest -q
 The unit tests cover the risk gate, position sizing, the market clock, the bar
 store, and the ORB strategy. They run without a database or network.
 
+## `trident` CLI
+
+After `pip install -e ".[dev]"` the `trident` command is on PATH as a shorthand
+for every operation. The underlying `scripts/*.py` files are unchanged — both
+forms work.
+
+```
+trident run shadow [--strategy S]       # live data, no orders
+trident run paper  [--strategy S] [-y]  # paper orders + deadman reminder
+trident run dashboard                   # FastAPI on :8765
+
+trident replay   [--date D] [--days N] [--equity N] [--strategy S] [--no-persist]
+trident backtest [--date D] [--days N] [--window-days N] [--slippage-bps N] ...
+trident compare  [--date D] [--days N] [--strategy S ...]
+trident screen   [--preset N] [--min-price N] [--max-price N] [--min-change N] ...
+trident suggest  [--max N]
+
+trident smoke                           # DB + Alpaca credential check
+trident status                          # DB / Alpaca / kill switch / watchlist / heartbeat
+
+trident kill-switch on|off              # toggle without the dashboard
+trident watchlist                       # list all named watchlists
+trident watchlist add AAPL NVDA
+trident watchlist remove AAPL
+trident watchlist activate NAME
+trident watchlist create NAME [SYMS...]
+trident watchlist delete NAME
+
+trident db upgrade                      # alembic upgrade head
+```
+
 ## Project layout
 
 ```
@@ -225,6 +271,7 @@ src/trident/
   settings.py          # pydantic-settings, loads .env
   clock.py             # market hours / holidays / early closes
   watchlist.py         # WATCHLIST constant + DB-backed resolve_watchlist()
+  cli.py               # `trident` CLI entry point (Typer); wraps scripts + package functions
   data/                # WebSocket feed + bar store + bar persistence + backfill
   strategies/          # Strategy protocol, registry, ORB + VWAP-reversion, management
   risk/                # the pre-trade gate, sizing, and limits

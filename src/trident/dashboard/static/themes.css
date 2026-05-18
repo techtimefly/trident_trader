@@ -1,0 +1,172 @@
+/* themes.css — color themes and font styles for the Trident dashboard.
+
+   A color theme is a set of CSS custom properties selected by the
+   [data-theme] attribute on <html>; a font style is selected by
+   [data-font]. The dashboard's structural CSS (panels, pills, tables in
+   index.html) reads only these variables, so switching either attribute
+   recolors / re-types every HTMX panel with no server round-trip and no
+   page reload. theme-picker.js persists the choice in localStorage and an
+   inline <head> script applies it before first paint.
+
+   Outer-ring: purely cosmetic. Nothing here touches trading logic. */
+
+/* ---- Color themes ------------------------------------------------- */
+/* Midnight is the default — applied when no [data-theme] is set. Every
+   theme defines the same variable set; index.html derives pill tints,
+   dot halos and the skeleton shimmer from these base colors with
+   color-mix(), so a theme only has to get its six neutrals and four
+   accents right. Each accent must read as text on that theme's panels. */
+
+:root,
+:root[data-theme="midnight"] {
+    --bg: #0a0a0b;
+    --panel: #111114;
+    --panel-2: #18181c;
+    --border: #26262d;
+    --text: #e6e6ea;
+    --text-dim: #8b8b95;
+    --green: #34d399;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --indigo: #818cf8;
+}
+
+:root[data-theme="graphite"] {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+    --indigo: #a371f7;
+}
+
+:root[data-theme="nord"] {
+    --bg: #2e3440;
+    --panel: #353c4a;
+    --panel-2: #3b4252;
+    --border: #4c566a;
+    --text: #eceff4;
+    --text-dim: #9aa4bb;
+    --green: #a3be8c;
+    --red: #bf616a;
+    --amber: #ebcb8b;
+    --indigo: #88c0d0;
+}
+
+:root[data-theme="paper"] {
+    --bg: #f4f4f3;
+    --panel: #ffffff;
+    --panel-2: #ececeb;
+    --border: #d6d6d2;
+    --text: #1b1b1d;
+    --text-dim: #6c6c75;
+    --green: #15803d;
+    --red: #c0282d;
+    --amber: #b45309;
+    --indigo: #4f46e5;
+}
+
+:root[data-theme="amber"] {
+    --bg: #0b0a07;
+    --panel: #14110b;
+    --panel-2: #1d1810;
+    --border: #3a2e18;
+    --text: #f3d8a4;
+    --text-dim: #a88c57;
+    --green: #6ee7a8;
+    --red: #ff6b6b;
+    --amber: #ffb224;
+    --indigo: #ffce6b;
+}
+
+/* ---- Font styles -------------------------------------------------- */
+/* Each style sets the sans (UI) and mono (numbers) families. Modern is
+   the default. The web fonts are loaded by index.html's <link>; a
+   browser only downloads the family actually in use, so listing all of
+   them there costs nothing until a style is selected. System pulls no
+   web font at all. */
+
+:root,
+:root[data-font="modern"] {
+    --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root[data-font="system"] {
+    --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+:root[data-font="plex"] {
+    --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root[data-font="mono"] {
+    --font-sans: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ---- Theme picker ------------------------------------------------- */
+/* The control lives in the header; theme-picker.js builds the popover
+   body and toggles .open. */
+
+.tt-theme-menu { position: relative; }
+
+.tt-theme-btn {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.4rem 0.7rem; border-radius: 8px;
+    font-size: 0.8rem; font-weight: 600;
+    color: var(--text-dim);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: color 0.12s ease, border-color 0.12s ease;
+}
+.tt-theme-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.tt-theme-btn svg { width: 0.95rem; height: 0.95rem; }
+
+.tt-theme-pop {
+    position: absolute; top: calc(100% + 0.5rem); right: 0; z-index: 50;
+    width: 17rem; padding: 0.85rem;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    display: none;
+}
+.tt-theme-pop.open { display: block; }
+
+.tt-pop-group + .tt-pop-group { margin-top: 0.9rem; }
+.tt-pop-label {
+    font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-dim); margin-bottom: 0.45rem;
+}
+
+.tt-opt {
+    display: flex; align-items: center; gap: 0.6rem; width: 100%;
+    padding: 0.4rem 0.5rem; border-radius: 7px;
+    background: transparent; border: 1px solid transparent;
+    color: var(--text); font-size: 0.83rem; text-align: left;
+    cursor: pointer;
+}
+.tt-opt + .tt-opt { margin-top: 0.15rem; }
+.tt-opt:hover { background: var(--panel-2); }
+.tt-opt[aria-checked="true"] {
+    background: var(--panel-2);
+    border-color: color-mix(in srgb, var(--indigo) 55%, transparent);
+}
+.tt-opt-name { flex: 1; }
+.tt-opt-check { color: var(--indigo); opacity: 0; font-size: 0.9rem; }
+.tt-opt[aria-checked="true"] .tt-opt-check { opacity: 1; }
+
+/* Color-theme swatch: a small cluster of the theme's key colors. */
+.tt-swatch {
+    display: inline-flex; flex-shrink: 0;
+    border-radius: 5px; overflow: hidden;
+    border: 1px solid var(--border);
+}
+.tt-swatch span { width: 0.7rem; height: 1.1rem; display: block; }

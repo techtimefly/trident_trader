@@ -345,8 +345,15 @@ async def main(strategy_name: str = "orb_5m") -> None:
     eod_task = asyncio.create_task(eod_flatten_loop())
 
     await stop_event.wait()
-    for task in (feed_task, hb_task, order_task, recon_task, eod_task):
+    # Stop the feed via its designed exit path first. A bare feed_task.cancel()
+    # leaves alpaca-py's websocket loop running and asyncio.run() hanging.
+    await feed.stop()
+    for task in (hb_task, order_task, recon_task, eod_task):
         task.cancel()
+    try:
+        await asyncio.wait_for(feed_task, timeout=10)
+    except (TimeoutError, asyncio.CancelledError):
+        feed_task.cancel()
     log.info("paper_run_complete")
     record("runner_stop", actor="paper_run", payload={})
 

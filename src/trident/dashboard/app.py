@@ -82,7 +82,9 @@ from trident.screener.presets import (
     DEFAULT_LOOKBACK_DAYS,
     resolve_screen_criteria,
 )
-from trident.suggest.persistence import get_latest_suggestions
+from trident.suggest.client import suggest_stocks
+from trident.suggest.persistence import get_latest_suggestions, save_suggestions
+from trident.suggest.suggestion import PlanContext
 from trident.watchlist import WATCHLIST
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -876,6 +878,74 @@ def _start_screen_run() -> tuple[str, bool]:
     return "Screen started — the Latest screen panel updates when it finishes.", False
 
 
+def _run_premarket_background() -> None:
+    """Run screen then AI suggest in sequence — the full pre-market precheck.
+
+    Shares _screen_run_lock with standalone screen runs so the two can never
+    overlap. Outer-ring: every failure is logged and swallowed; the lock is
+    always released so a later run can start.
+    """
+    _log = get_logger("dashboard.premarket")
+    try:
+        criteria, lookback = resolve_screen_criteria()
+        symbols, fmp_meta = resolve_universe(
+            criteria, max_symbols=500, fallback_limit=500
+        )
+        run_criteria = criteria
+        if not fmp_meta:
+            run_criteria = replace(
+                criteria,
+                min_market_cap=None,
+                max_market_cap=None,
+                sectors=(),
+                exchanges=(),
+            )
+        candidates = build_candidates(
+            symbols, lookback_days=lookback, fmp_meta=fmp_meta
+        )
+        result = screen(candidates, run_criteria)
+        screen_run_id = save_screen(
+            result=result,
+            universe_size=len(symbols),
+            lookback_days=lookback,
+            actor="dashboard",
+        )
+        _log.info("premarket_screen_done", matched=result.matched)
+
+        plan = PlanContext()
+        suggestion_result = suggest_stocks(result.matches, plan)
+        save_suggestions(
+            result=suggestion_result,
+            screen_run_id=screen_run_id,
+            actor="dashboard",
+        )
+        _log.info(
+            "premarket_suggest_done",
+            ok=suggestion_result.ok,
+            count=suggestion_result.count,
+        )
+    except Exception:
+        _log.exception("dashboard_premarket_failed")
+    finally:
+        _screen_run_lock.release()
+
+
+def _start_premarket_run() -> tuple[str, bool]:
+    """Kick off a background pre-market run (screen then AI suggest).
+
+    Shares _screen_run_lock with standalone screen runs — the two must not
+    overlap since both write screen results. Returns (notice, is_error).
+    """
+    if not _screen_run_lock.acquire(blocking=False):
+        return "A screen or pre-market run is already in progress — results appear shortly.", True
+    try:
+        threading.Thread(target=_run_premarket_background, daemon=True).start()
+    except Exception:
+        _screen_run_lock.release()
+        return "Could not start the pre-market run.", True
+    return "Pre-market check started — panels update when it finishes.", False
+
+
 @app.post("/api/screen-run", response_class=HTMLResponse)
 def api_screen_run(request: Request) -> Any:
     notice, error = _start_screen_run()
@@ -902,12 +972,13 @@ def _suggest_context() -> dict[str, Any]:
     A not-ok run (no API key, nothing to review, an API error) still renders:
     the run's ``notice`` explains why there are no suggestions.
     """
+    checking = _screen_run_lock.locked()
     try:
         latest = get_latest_suggestions()
     except Exception:
-        return {"run": None, "rows": [], "load_error": True}
+        return {"run": None, "rows": [], "load_error": True, "checking": checking}
     if latest is None:
-        return {"run": None, "rows": [], "load_error": False}
+        return {"run": None, "rows": [], "load_error": False, "checking": checking}
 
     run_view = {
         "started_at": latest.started_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET"),
@@ -925,12 +996,21 @@ def _suggest_context() -> dict[str, Any]:
         }
         for s in latest.suggestions
     ]
-    return {"run": run_view, "rows": rows, "load_error": False}
+    return {"run": run_view, "rows": rows, "load_error": False, "checking": checking}
 
 
 @app.get("/api/suggest", response_class=HTMLResponse)
 def api_suggest(request: Request) -> Any:
     return templates.TemplateResponse(request, "_suggest.html", _suggest_context())
+
+
+@app.post("/api/premarket/run", response_class=HTMLResponse)
+def api_premarket_run(request: Request) -> Any:
+    notice, error = _start_premarket_run()
+    ctx = _suggest_context()
+    ctx["notice"] = notice
+    ctx["notice_error"] = error
+    return templates.TemplateResponse(request, "_suggest.html", ctx)
 
 
 def _quote_row(symbol: str, q: QuoteView | None) -> dict[str, Any]:

@@ -161,7 +161,7 @@ exist".
 
 ## Test policy
 
-- 353 unit tests; they run in <1s and need no network or database.
+- 363 unit tests; they run in <1s and need no network or database.
 - Risk gate, position sizing, ORB, EOD timing, and the fill simulator have
   exhaustive branch coverage.
 - Inner-ring code (gate, execution, safety, portfolio) must ship with tests in the
@@ -192,6 +192,16 @@ exist".
    in plaintext. `audit/log.py`'s `configure_logging()` raises the `httpx` logger
    to WARNING; any new logging setup must preserve this. The FMP integration in
    `screener/fmp.py` is the only place that calls FMP.
+8. **AI suggestion credentials — two paths.** `suggest/client.py` accepts either
+   `ANTHROPIC_API_KEY` (pay-per-token) or `CLAUDE_CODE_OAUTH_TOKEN` (Claude Code
+   subscription). If neither is set the feature degrades gracefully (not-ok result,
+   no crash). The SDK does not read `CLAUDE_CODE_OAUTH_TOKEN` natively; the client
+   passes it explicitly as `auth_token`. Never put model identifiers in docs or
+   committed files.
+9. **SIGTERM shutdown needs `feed.stop()`.** Cancelling the `feed_task` directly
+   leaves alpaca-py's `_run_forever` loop running and `asyncio.run()` hanging.
+   Always call `await feed.stop()` (uses `stop_ws()`) before cancelling other tasks;
+   both `shadow_run.py` and `paper_run.py` follow this order.
 
 ## Style & conventions
 

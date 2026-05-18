@@ -54,6 +54,18 @@ docker compose up -d postgres
 alembic upgrade head
 ```
 
+For persistent auto-start on boot, two systemd user services
+(`trident-postgres.service` and `trident-dashboard.service`) can be enabled:
+
+```bash
+scripts/start.sh          # enable + start both
+scripts/stop.sh           # stop dashboard (add --postgres to also stop Postgres)
+scripts/postgres_up.sh    # create-or-start the container and wait for pg_isready
+```
+
+The services and `postgres_up.sh` use `docker` directly (not `docker compose`)
+to avoid docker-compose v1 compatibility issues.
+
 ### 4. Smoke test
 
 ```bash
@@ -79,6 +91,19 @@ This connects to Alpaca's WebSocket bar feed during US market hours, runs the
 ORB strategy, and logs every signal + risk-gate decision. **No orders are placed.**
 The runner writes a heartbeat every 5 seconds so the dashboard can show whether
 it's alive.
+
+To run it automatically each trading day, install the cron launcher:
+
+```bash
+crontab -e
+# Add (cron_TZ=America/New_York):
+#   CRON_TZ=America/New_York
+#   20 9 * * 1-5 /absolute/path/to/scripts/run_shadow_scheduled.sh >> logs/cron.log 2>&1
+```
+
+`run_shadow_scheduled.sh` guards against weekends, NYSE holidays, duplicate
+starts, and Postgres being down. It runs `shadow_run.py --strategy orb_5m` for
+up to 7 hours, then exits cleanly via SIGTERM.
 
 ### 6a. Replay against historical days (no waiting for the open)
 
@@ -148,6 +173,9 @@ Open <http://127.0.0.1:8765>. The page shows:
 - Watchlists — every named list with live per-symbol quotes (last price, day
   change, bid/ask, volume from the IEX snapshot feed); add/remove symbols,
   create/rename/activate/delete lists. The runner trades the active list.
+- AI pre-market check — a **Run pre-market check** button that runs the screener
+  and then asks Claude to review the candidates. Requires `ANTHROPIC_API_KEY` or
+  `CLAUDE_CODE_OAUTH_TOKEN`; degrades gracefully if neither is set.
 - The last 24 hours of audit events.
 - A red **kill switch** button. Engaging it makes the gate reject every new
   signal until you release it. The toggle is persisted to the `system_state`
@@ -202,7 +230,10 @@ src/trident/
 tests/unit/            # pure-function tests for the safety-critical code
 scripts/               # smoke_test, shadow_run, replay, backtest, compare,
                        # paper_run, deadman, run_dashboard, backfill_daily,
-                       # screen, suggest
+                       # screen, suggest,
+                       # postgres_up.sh (create-or-start the Docker container),
+                       # run_shadow_scheduled.sh (cron launcher, 09:20 ET weekdays),
+                       # start.sh / stop.sh (systemd service helpers)
 ```
 
 ## Roadmap

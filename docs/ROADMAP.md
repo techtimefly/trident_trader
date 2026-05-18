@@ -22,7 +22,7 @@ later phases are concrete on architecture but lighter, to be detailed when reach
 ## Constraints (every phase)
 
 - `src/trident/risk/gate.py` stays a **pure function** — new inputs arrive as
-  defaulted dataclass fields computed by callers. All ~191 unit tests stay green.
+  defaulted dataclass fields computed by callers. All unit tests stay green.
 - Inner-ring code (`risk/`, `execution/`, `portfolio/`, `safety/`, `deadman.py`)
   ships tests in the **same commit**. Outer ring (`dashboard/`, `backtest/`) does not.
 - Money is `Decimal`; times stored UTC, displayed ET. `from __future__ import annotations`.
@@ -234,7 +234,7 @@ is last and gated on evidence.
 ## Verification (per phase, repo-consistent)
 
 ```bash
-PYTHONPATH=src python -m pytest tests/unit -q          # all ~191 + new stay green
+PYTHONPATH=src python -m pytest tests/unit -q          # all unit tests stay green
 ruff check src tests && mypy src                        # clean
 alembic upgrade head && alembic downgrade -1 && alembic upgrade head   # each new migration
 PYTHONPATH=src python scripts/replay.py --date <known-day> --strategy orb_5m   # Phase 1: byte-identical to pre-refactor

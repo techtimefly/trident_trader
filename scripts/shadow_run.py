@@ -191,8 +191,14 @@ async def main(strategy_name: str = "orb_5m") -> None:
     hb_task = asyncio.create_task(heartbeat_loop())
 
     await stop_event.wait()
-    feed_task.cancel()
+    # Stop the feed via its designed exit path. A bare feed_task.cancel() leaves
+    # alpaca-py's websocket loop running and asyncio.run() hanging on shutdown.
+    await feed.stop()
     hb_task.cancel()
+    try:
+        await asyncio.wait_for(feed_task, timeout=10)
+    except (TimeoutError, asyncio.CancelledError):
+        feed_task.cancel()
     log.info("shadow_run_complete")
 
 

@@ -1,0 +1,71 @@
+{% extends "_layout.html" %}
+{% block title %}Screener — Trident Trader{% endblock %}
+
+{% block sidebar %}
+<div>
+    <div class="nav-group px-2 mb-1">Screener</div>
+    <a class="nav-link" href="#panel-screen-presets">Screen filters</a>
+    <a class="nav-link" href="#panel-screen">Latest screen</a>
+    <a class="nav-link" href="#panel-screen-perf">Backtest overlay</a>
+    <a class="nav-link" href="#panel-suggest">AI suggestions</a>
+</div>
+{% endblock %}
+
+{% block main %}
+<section id="panel-screen-presets" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Screen filters</h2>
+        <span class="pill pill-dim">managed &middot; editable</span>
+    </div>
+    <div
+        id="screen-presets"
+        hx-get="/api/screen-presets"
+        hx-trigger="load"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-screen" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Latest screen</h2>
+        <span class="pill pill-dim">price &middot; volume &middot; % change</span>
+    </div>
+    <div
+        id="screen"
+        hx-get="/api/screen"
+        hx-trigger="load, every 30s"
+        hx-include="#screen-watchlist-select"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-screen-perf" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Backtest overlay</h2>
+        <span class="pill pill-dim">screener symbols · replay performance</span>
+    </div>
+    <div
+        id="screen-perf"
+        hx-get="/api/screen-perf"
+        hx-trigger="load, every 60s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-suggest" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">AI stock suggestions</h2>
+        <span class="pill pill-amber">advisory &middot; not advice</span>
+    </div>
+    <div
+        id="suggest"
+        hx-get="/api/suggest"
+        hx-trigger="load, every 30s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+{% endblock %}

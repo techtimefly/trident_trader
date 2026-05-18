@@ -1,0 +1,71 @@
+<div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-3">
+    <form hx-get="/api/signal-history"
+          hx-target="#signal-history"
+          hx-swap="innerHTML"
+          class="flex items-center gap-2">
+        <label class="text-xs dim">Date</label>
+        <input type="date" name="date" value="{{ selected_date }}"
+               class="mono text-sm px-3 py-1 rounded-md border border-[var(--border)] bg-[var(--panel-2)]"
+               onchange="this.form.requestSubmit()" />
+    </form>
+</div>
+
+{% if load_error %}
+<div class="empty">Could not load signals. Check the database connection.</div>
+{% elif not rows %}
+<div class="empty">No signals found for {{ selected_date }}.</div>
+{% else %}
+<div class="max-h-[32rem] overflow-y-auto">
+<table class="tt mono text-sm">
+    <thead class="sticky top-0 bg-[var(--panel)]">
+        <tr>
+            <th>Time</th>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Entry</th>
+            <th>Stop</th>
+            <th>Target</th>
+            <th>Gate</th>
+            <th>Order state</th>
+            <th>Fill price</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="dim">{{ r.ts }}</td>
+            <td class="font-semibold">{{ r.symbol }}</td>
+            <td>{{ r.side }}</td>
+            <td>{{ r.entry }}</td>
+            <td class="neg">{{ r.stop }}</td>
+            <td class="pos">{{ r.target }}</td>
+            <td>
+                {% if r.approved %}
+                    <span class="pill pill-green">approved</span>
+                {% elif r.decision == "—" %}
+                    <span class="pill pill-dim">pending</span>
+                {% else %}
+                    <span class="pill pill-red" title="{{ r.reason }}">{{ r.decision }}</span>
+                {% endif %}
+            </td>
+            {% if r.order %}
+                <td>
+                    {% if r.order.is_filled %}
+                        <span class="pill pill-green">filled {{ r.order.filled_at }}</span>
+                    {% elif r.order.is_rejected %}
+                        <span class="pill pill-red">{{ r.order.state }}</span>
+                    {% else %}
+                        <span class="pill pill-amber">{{ r.order.state }}</span>
+                    {% endif %}
+                </td>
+                <td class="{{ 'pos' if r.order.is_filled else 'dim' }}">{{ r.order.fill_price }}</td>
+            {% else %}
+                <td class="dim">—</td>
+                <td class="dim">—</td>
+            {% endif %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}

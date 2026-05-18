@@ -1,0 +1,100 @@
+{% extends "_layout.html" %}
+{% block title %}Research — Trident Trader{% endblock %}
+
+{% block sidebar %}
+<div>
+    <div class="nav-group px-2 mb-1">Research</div>
+    <a class="nav-link" href="#panel-pnl">Trade P&amp;L</a>
+    <a class="nav-link" href="#panel-symbol-perf">Symbol performance</a>
+    <a class="nav-link" href="#panel-signal-history">Signal history</a>
+    <a class="nav-link" href="#panel-replay">Latest replay</a>
+    <a class="nav-link" href="#panel-backtest-history">Backtest history</a>
+    <a class="nav-link" href="#panel-compare">Strategy comparison</a>
+</div>
+{% endblock %}
+
+{% block main %}
+<section id="panel-pnl" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Trade P&amp;L</h2>
+        <span class="pill pill-dim">closed round-trips</span>
+    </div>
+    <div
+        id="pnl"
+        hx-get="/api/pnl"
+        hx-trigger="load, every 30s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-symbol-perf" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Symbol performance</h2>
+        <span class="pill pill-dim">backtest · all runs</span>
+    </div>
+    <div
+        id="symbol-perf"
+        hx-get="/api/symbol-perf"
+        hx-trigger="load, every 60s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-signal-history" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Signal history</h2>
+        <span class="pill pill-dim">by date · with order outcomes</span>
+    </div>
+    <div
+        id="signal-history"
+        hx-get="/api/signal-history"
+        hx-trigger="load"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-replay" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Latest replay</h2>
+        <span class="pill pill-dim">simulation</span>
+    </div>
+    <div
+        id="replay"
+        hx-get="/api/replay"
+        hx-trigger="load, every 30s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-backtest-history" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Backtest history</h2>
+        <span class="pill pill-amber">honest · slippage + fees</span>
+    </div>
+    <div
+        id="backtest-history"
+        hx-get="/api/backtest-history"
+        hx-trigger="load, every 30s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-compare" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Strategy comparison</h2>
+        <span class="pill pill-dim">latest run per strategy</span>
+    </div>
+    <div
+        id="compare"
+        hx-get="/api/compare"
+        hx-trigger="load, every 30s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-32 m-4 rounded-md"></div>
+    </div>
+</section>
+{% endblock %}

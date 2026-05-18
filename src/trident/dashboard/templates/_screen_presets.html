@@ -1,0 +1,150 @@
+{% if load_error %}
+<div class="empty">Could not load screen presets. Check the database connection.</div>
+{% else %}
+<div class="p-5 space-y-5">
+
+    {% if notice %}
+    <div>
+        <span class="pill {{ 'pill-red' if notice_error else 'pill-green' }}">{{ notice }}</span>
+    </div>
+    {% endif %}
+
+    <div class="flex flex-wrap items-center gap-3">
+        <form hx-post="/api/screen-run" hx-target="#screen-presets" hx-swap="innerHTML">
+            <button class="btn btn-ghost text-sm" type="submit">Run screen now</button>
+        </form>
+        <span class="text-xs dim">
+            Runs the active preset &mdash; the Latest screen panel updates when it finishes.
+        </span>
+    </div>
+
+    {% if not fmp_configured %}
+    <div class="text-xs dim border border-[var(--border)] rounded px-3 py-2">
+        <span class="pill pill-amber">FMP off</span>
+        Market cap / sector / exchange filters are skipped until
+        <span class="mono">FMP_API_KEY</span> is set.
+    </div>
+    {% endif %}
+
+    <div>
+        <div class="text-xs dim uppercase tracking-widest mb-2">Presets</div>
+        {% if presets %}
+        <div class="space-y-2">
+            {% for p in presets %}
+            <div class="flex flex-wrap items-center gap-2 border border-[var(--border)] rounded px-3 py-2">
+                <span class="font-semibold text-sm">{{ p.name }}</span>
+                {% if p.is_active %}
+                <span class="pill pill-green">active</span>
+                {% endif %}
+                <span class="text-xs dim mono flex-1 min-w-[12rem]">{{ p.summary }} &middot; {{ p.lookback_days }}d</span>
+                <form hx-post="/api/screen-presets" hx-target="#screen-presets" hx-swap="innerHTML"
+                      class="flex items-center gap-2">
+                    <input type="hidden" name="preset_id" value="{{ p.id }}" />
+                    {% if not p.is_active %}
+                    <button class="btn btn-ghost text-xs" type="submit" name="action" value="activate">Activate</button>
+                    {% endif %}
+                    <button class="btn btn-danger text-xs" type="submit" name="action" value="delete">Delete</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-sm dim">
+            No presets yet &mdash; the screener uses a default liquidity floor.
+            Create one below.
+        </div>
+        {% endif %}
+    </div>
+
+    <form hx-post="/api/screen-presets" hx-target="#screen-presets" hx-swap="innerHTML"
+          class="border-t border-[var(--border)] pt-4 space-y-3">
+        <input type="hidden" name="action" value="save" />
+        <div>
+            <label class="text-xs dim uppercase tracking-widest block mb-1">Preset name</label>
+            <input type="text" name="name" value="{{ active.name if active else '' }}"
+                   placeholder="e.g. Large-cap tech"
+                   class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Min price</label>
+                <input type="number" name="min_price" step="0.01" min="0" value="{{ form.min_price }}"
+                       placeholder="none"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Max price</label>
+                <input type="number" name="max_price" step="0.01" min="0" value="{{ form.max_price }}"
+                       placeholder="none"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Min avg volume</label>
+                <input type="number" name="min_avg_volume" step="1" min="0" value="{{ form.min_avg_volume }}"
+                       placeholder="none"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Lookback (days)</label>
+                <input type="number" name="lookback_days" step="1" min="2" value="{{ form.lookback_days }}"
+                       placeholder="20"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Min change %</label>
+                <input type="number" name="min_change" step="0.1" value="{{ form.min_change }}"
+                       placeholder="none"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Max change %</label>
+                <input type="number" name="max_change" step="0.1" value="{{ form.max_change }}"
+                       placeholder="none"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Min market cap</label>
+                <input type="number" name="min_market_cap" step="1" min="0" value="{{ form.min_market_cap }}"
+                       placeholder="none (FMP)"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Max market cap</label>
+                <input type="number" name="max_market_cap" step="1" min="0" value="{{ form.max_market_cap }}"
+                       placeholder="none (FMP)"
+                       class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full" />
+            </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Sectors (FMP)</label>
+                <select name="sector" multiple size="6"
+                        class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full">
+                    {% for s in sectors_all %}
+                    <option value="{{ s }}" {% if s in form.sectors %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="text-xs dim uppercase tracking-widest block mb-1">Exchanges (FMP)</label>
+                <select name="exchange" multiple size="6"
+                        class="mono text-sm bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1 w-full">
+                    {% for e in exchanges_all %}
+                    <option value="{{ e }}" {% if e in form.exchanges %}selected{% endif %}>{{ e }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+            <button class="btn btn-ghost text-sm" type="submit">Save &amp; activate preset</button>
+        </div>
+    </form>
+    <div class="text-xs dim">
+        Leave a number blank for &ldquo;no bound&rdquo;. Saving creates or updates the
+        named preset and makes it active &mdash; the next
+        <span class="mono">scripts/screen.py</span> run uses it. Hold Ctrl/Cmd to
+        pick several sectors or exchanges.
+    </div>
+
+</div>
+{% endif %}

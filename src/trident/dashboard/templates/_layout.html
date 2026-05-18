@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Trident Trader{% endblock %}</title>
+    <link rel="icon" type="image/png" href="/static/logo.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/themes.css" />
+    <script>
+        (function () {
+            var d = document.documentElement;
+            try {
+                d.setAttribute('data-theme', localStorage.getItem('tt-theme') || 'midnight');
+                d.setAttribute('data-font', localStorage.getItem('tt-font') || 'modern');
+            } catch (e) {
+                d.setAttribute('data-theme', 'midnight');
+                d.setAttribute('data-font', 'modern');
+            }
+        })();
+    </script>
+    <style>
+        html, body {
+            background: var(--bg); color: var(--text);
+            transition: background-color 0.25s ease, color 0.25s ease;
+        }
+        html { scroll-behavior: smooth; }
+        body { font-family: var(--font-sans); }
+        .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+        .panel {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: 12px; scroll-margin-top: 1.25rem;
+            transition: background-color 0.25s ease, border-color 0.25s ease;
+        }
+        .panel-2 { background: var(--panel-2); }
+        .dim { color: var(--text-dim); }
+        .pos { color: var(--green); }
+        .neg { color: var(--red); }
+        .pill {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.2rem 0.6rem; border-radius: 999px;
+            font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .pill-green { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+        .pill-red   { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
+        .pill-amber { background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--amber); }
+        .pill-dim   { background: color-mix(in srgb, var(--text-dim) 12%, transparent); color: var(--text-dim); }
+        .dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; display: inline-block; }
+        .dot-green { background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 20%, transparent); }
+        .dot-red   { background: var(--red);   box-shadow: 0 0 0 4px color-mix(in srgb, var(--red) 20%, transparent); }
+        .dot-amber { background: var(--amber); box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 20%, transparent); }
+        .dot-dim   { background: var(--text-dim); }
+        button.btn {
+            padding: 0.55rem 1rem; border-radius: 8px; font-weight: 600;
+            transition: transform 0.05s ease, background 0.15s ease;
+        }
+        button.btn:active { transform: translateY(1px); }
+        .btn-danger { background: #b91c1c; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+        .btn-ghost:hover { background: var(--panel-2); }
+        table.tt { width: 100%; border-collapse: separate; border-spacing: 0; }
+        table.tt th, table.tt td { padding: 0.55rem 0.75rem; text-align: left; }
+        table.tt thead th { color: var(--text-dim); font-weight: 500; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+        table.tt tbody tr { border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+        table.tt tbody tr:last-child { border-bottom: none; }
+        table.tt tbody tr:hover { background: var(--panel-2); }
+        .skeleton { background: linear-gradient(90deg, var(--panel-2) 0%, color-mix(in srgb, var(--panel-2) 60%, var(--border)) 50%, var(--panel-2) 100%); background-size: 200% 100%; animation: shimmer 1.6s infinite; }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        .empty { color: var(--text-dim); font-size: 0.9rem; padding: 1.5rem; text-align: center; }
+        .nav-group { font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+        .nav-link {
+            display: block; padding: 0.3rem 0.6rem; border-radius: 6px;
+            font-size: 0.82rem; color: var(--text-dim);
+            border-left: 2px solid transparent;
+            transition: background 0.12s ease, color 0.12s ease;
+        }
+        .nav-link:hover { background: var(--panel-2); color: var(--text); }
+        .nav-link.active {
+            background: var(--panel-2); color: var(--indigo);
+            border-left-color: var(--indigo);
+        }
+        .nav-tab {
+            padding: 0.35rem 0.85rem; border-radius: 6px;
+            font-size: 0.82rem; font-weight: 500; color: var(--text-dim);
+            transition: background 0.12s ease, color 0.12s ease;
+            white-space: nowrap;
+        }
+        .nav-tab:hover { background: var(--panel-2); color: var(--text); }
+        .nav-tab.active { background: var(--panel-2); color: var(--indigo); }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <header class="px-6 py-3 border-b border-[var(--border)] flex items-center gap-4">
+        <div class="flex items-center gap-3 shrink-0">
+            <img src="/static/logo.png" alt="Trident Trader" class="w-7 h-7 rounded-md" />
+            <h1 class="text-lg font-semibold tracking-tight">Trident Trader</h1>
+            <span class="pill pill-dim">paper • v0.1</span>
+        </div>
+
+        <nav class="flex-1 flex items-center justify-center gap-1">
+            <a href="/"          class="nav-tab {% if active_page == 'trading'  %}active{% endif %}">Trading</a>
+            <a href="/plan"      class="nav-tab {% if active_page == 'plan'     %}active{% endif %}">Plan</a>
+            <a href="/screener"  class="nav-tab {% if active_page == 'screener' %}active{% endif %}">Screener</a>
+            <a href="/research"  class="nav-tab {% if active_page == 'research' %}active{% endif %}">Research</a>
+            <a href="/system"    class="nav-tab {% if active_page == 'system'   %}active{% endif %}">System</a>
+        </nav>
+
+        <div class="flex items-center gap-3 shrink-0">
+            <div class="text-sm dim mono" id="clock"></div>
+            <div class="tt-theme-menu" id="theme-menu">
+                <button type="button" class="tt-theme-btn" id="theme-btn"
+                        aria-haspopup="dialog" aria-expanded="false" title="Color theme &amp; font">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle>
+                        <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle>
+                        <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                        <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle>
+                        <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path>
+                    </svg>
+                    <span>Theme</span>
+                </button>
+                <div class="tt-theme-pop" id="theme-pop" role="dialog" aria-label="Appearance"></div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Persistent status bar — visible on every page, kill switch always reachable -->
+    <div class="px-6 py-2 border-b border-[var(--border)]" style="background: var(--panel);">
+        <div id="hero-bar"
+             hx-get="/api/hero-bar"
+             hx-trigger="load, every 3s"
+             hx-swap="innerHTML">
+            <div class="skeleton h-5 rounded-md w-full max-w-2xl"></div>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto flex gap-6 px-6 py-6">
+        <aside class="hidden lg:block w-52 shrink-0">
+            <nav class="sticky top-6 space-y-4">
+                {% block sidebar %}{% endblock %}
+            </nav>
+        </aside>
+
+        <main class="flex-1 min-w-0 space-y-6">
+            {% block main %}{% endblock %}
+            <footer class="text-xs dim text-center py-8">
+                Not investment advice. Paper trading only. Equity / positions are read from your Alpaca paper account.
+            </footer>
+        </main>
+    </div>
+
+    <script>
+        function tickClock() {
+            var el = document.getElementById('clock');
+            if (!el) return;
+            var now = new Date();
+            el.textContent = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false }) + ' ET';
+        }
+        tickClock();
+        setInterval(tickClock, 1000);
+
+        (function () {
+            var links = document.querySelectorAll('.nav-link');
+            if (!links.length || !('IntersectionObserver' in window)) return;
+            var byId = {};
+            links.forEach(function (a) {
+                byId[a.getAttribute('href').slice(1)] = a;
+            });
+            var current = null;
+            var obs = new IntersectionObserver(function (entries) {
+                entries.forEach(function (e) {
+                    if (!e.isIntersecting) return;
+                    var link = byId[e.target.id];
+                    if (!link || link === current) return;
+                    if (current) current.classList.remove('active');
+                    link.classList.add('active');
+                    current = link;
+                });
+            }, { rootMargin: '0px 0px -70% 0px' });
+            Object.keys(byId).forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) obs.observe(el);
+            });
+        })();
+    </script>
+    <script src="/static/theme-picker.js"></script>
+</body>
+</html>

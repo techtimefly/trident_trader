@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # an empty result rather than calling the network or crashing.
     anthropic_api_key: str = ""
 
+    # Financial Modeling Prep API key for the screener's fast server-side
+    # universe pre-filter (market cap / sector / exchange). Optional — when
+    # blank, the screener falls back to the alphabetical Alpaca universe.
+    fmp_api_key: str = ""
+
     database_url: str = "postgresql+psycopg2://trident:trident@localhost:5432/trident"
 
     risk_per_trade_pct: Decimal = Field(default=Decimal("1.0"))
@@ -72,6 +77,7 @@ class Settings(BaseSettings):
     @field_validator(
         "alpaca_data_feed",
         "default_strategy",
+        "fmp_api_key",
         "log_level",
         "environment",
         "backtest_slippage_bps",

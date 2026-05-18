@@ -12,8 +12,9 @@ is correctness and discipline, not feature breadth.
 
 - **Strategies:** selected by name from a registry — `orb_5m` (Opening Range
   Breakout) and `vwap_reversion` (VWAP mean-reversion, long + short). Traded on a
-  DB-backed watchlist that defaults to liquid US large-caps (SPY, QQQ, AAPL, MSFT,
-  NVDA, AMD).
+  DB-backed watchlist. Multiple named watchlists are supported; exactly one is
+  active at a time, and the runner trades that one. With none set, the watchlist
+  falls back to liquid US large-caps (SPY, QQQ, AAPL, MSFT, NVDA, AMD).
 - **Broker:** Alpaca paper account (the adapter refuses non-paper URLs).
 - **Data:** Alpaca's bundled IEX feed.
 - **Modes:**
@@ -44,6 +45,8 @@ cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+# This installs the `trident` CLI on PATH. After this you can run
+# `trident <command>` as a shorthand for the scripts (see below).
 ```
 
 ### 3. Postgres
@@ -53,10 +56,24 @@ docker compose up -d postgres
 alembic upgrade head
 ```
 
+For persistent auto-start on boot, two systemd user services
+(`trident-postgres.service` and `trident-dashboard.service`) can be enabled:
+
+```bash
+scripts/start.sh          # enable + start both
+scripts/stop.sh           # stop dashboard (add --postgres to also stop Postgres)
+scripts/postgres_up.sh    # create-or-start the container and wait for pg_isready
+```
+
+The services and `postgres_up.sh` use `docker` directly (not `docker compose`)
+to avoid docker-compose v1 compatibility issues.
+
 ### 4. Smoke test
 
 ```bash
 PYTHONPATH=src python scripts/smoke_test.py
+# or equivalently:
+trident smoke
 ```
 
 Expected output (JSON lines): `db_ok`, `alpaca_ok`. If either fails, fix that
@@ -72,12 +89,31 @@ PYTHONPATH=src python scripts/backfill_daily.py 60
 
 ```bash
 PYTHONPATH=src python scripts/shadow_run.py
+# or equivalently:
+trident run shadow
 ```
 
 This connects to Alpaca's WebSocket bar feed during US market hours, runs the
 ORB strategy, and logs every signal + risk-gate decision. **No orders are placed.**
 The runner writes a heartbeat every 5 seconds so the dashboard can show whether
 it's alive.
+
+To run it automatically each trading day, install the cron launcher:
+
+```bash
+crontab -e
+# Add one line. The time must be in server-local time, not ET:
+# - If the server is in a UTC-offset timezone, compute accordingly.
+# - On this machine (MDT, UTC-6): 07:20 local = 09:20 ET year-round.
+# - The Debian vixie-cron used here ignores CRON_TZ for scheduling;
+#   set the variable anyway so child processes see the correct TZ.
+#   CRON_TZ=America/New_York
+#   20 7 * * 1-5 /absolute/path/to/scripts/run_shadow_scheduled.sh >> logs/cron.log 2>&1
+```
+
+`run_shadow_scheduled.sh` guards against weekends, NYSE holidays, duplicate
+starts, and Postgres being down. It runs `shadow_run.py --strategy orb_5m` for
+up to 7 hours, then exits cleanly via SIGTERM.
 
 ### 6a. Replay against historical days (no waiting for the open)
 
@@ -86,6 +122,11 @@ PYTHONPATH=src python scripts/replay.py                  # yesterday
 PYTHONPATH=src python scripts/replay.py --date 2026-05-12
 PYTHONPATH=src python scripts/replay.py --days 250       # last ~year
 PYTHONPATH=src python scripts/replay.py --days 90 --no-persist   # console-only
+# or equivalently:
+trident replay
+trident replay --date 2026-05-12
+trident replay --days 250
+trident replay --days 90 --no-persist
 ```
 
 Fetches 1-min IEX bars for the chosen day(s), feeds them through the same
@@ -108,6 +149,8 @@ walk-forward) is `scripts/backtest.py`.
 ```bash
 # Terminal A — the runner
 PYTHONPATH=src python scripts/paper_run.py
+# or equivalently:
+trident run paper
 
 # Terminal B — the dead-man's switch (independent process)
 PYTHONPATH=src python scripts/deadman.py
@@ -137,17 +180,38 @@ In a second terminal:
 
 ```bash
 PYTHONPATH=src python scripts/run_dashboard.py
+# or equivalently:
+trident run dashboard
 ```
 
-Open <http://127.0.0.1:8765>. The page shows:
-- Account equity, cash, buying power (live from Alpaca).
-- Market open/closed indicator and a heartbeat-based bot status.
-- Open positions in the Alpaca paper account.
-- Today's signals with the gate decision next to each.
-- The last 24 hours of audit events.
-- A red **kill switch** button. Engaging it makes the gate reject every new
-  signal until you release it. The toggle is persisted to the `system_state`
-  table so the shadow runner sees it without needing a restart.
+Open <http://127.0.0.1:8765>. The dashboard has five pages reachable from the
+top navigation bar. A persistent status strip on every page shows equity,
+market state, bot heartbeat, and the kill switch.
+
+- **Trading** — open positions, today's signals with gate decisions, today's
+  orders, and manual controls (close a position, adjust a stop, cancel an order).
+- **Plan** — today's capital-budget and day-trade cap; watchlist management.
+  Every named watchlist shows live per-symbol quotes (last price, day change,
+  bid/ask, volume from the IEX snapshot feed); add/remove symbols,
+  create/rename/activate/delete lists. The runner trades the active list.
+- **Screener** — managed screen-filter presets (editable criteria, activate /
+  delete); latest screen results with an "add to watchlist" action; backtest
+  overlay panel showing how screener symbols have performed in replay runs; AI
+  stock suggestions panel with a **Run pre-market check** button. AI suggestions
+  require `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`; degrades gracefully
+  if neither is set.
+- **Research** — per-trade P&L for closed live trades; per-symbol aggregated
+  stats (trades, win rate, avg R, total P&L) across all runs; signal history
+  browser (by date, with fill prices); latest replay run summary and trade list;
+  backtest history (all runs, newest-first) with a trigger form for new backtest
+  runs; strategy comparison panel.
+- **System** — settings panel (API keys, risk defaults, operational config,
+  backtest cost model — edits `.env` in-place); connection health (Alpaca, FMP,
+  DB); live log tail; last 24 hours of audit events.
+
+The kill switch on the status strip engages immediately; the gate rejects every
+new signal until it is released. The toggle is persisted to the `system_state`
+table so runners see it without a restart.
 
 The dashboard has no auth. The launcher binds to `0.0.0.0` by default so
 Codespaces / Docker port-forwarding works; on a personal machine set
@@ -173,6 +237,37 @@ pytest -q
 The unit tests cover the risk gate, position sizing, the market clock, the bar
 store, and the ORB strategy. They run without a database or network.
 
+## `trident` CLI
+
+After `pip install -e ".[dev]"` the `trident` command is on PATH as a shorthand
+for every operation. The underlying `scripts/*.py` files are unchanged — both
+forms work.
+
+```
+trident run shadow [--strategy S]       # live data, no orders
+trident run paper  [--strategy S] [-y]  # paper orders + deadman reminder
+trident run dashboard                   # FastAPI on :8765
+
+trident replay   [--date D] [--days N] [--equity N] [--strategy S] [--no-persist]
+trident backtest [--date D] [--days N] [--window-days N] [--slippage-bps N] ...
+trident compare  [--date D] [--days N] [--strategy S ...]
+trident screen   [--preset N] [--min-price N] [--max-price N] [--min-change N] ...
+trident suggest  [--max N]
+
+trident smoke                           # DB + Alpaca credential check
+trident status                          # DB / Alpaca / kill switch / watchlist / heartbeat
+
+trident kill-switch on|off              # toggle without the dashboard
+trident watchlist                       # list all named watchlists
+trident watchlist add AAPL NVDA
+trident watchlist remove AAPL
+trident watchlist activate NAME
+trident watchlist create NAME [SYMS...]
+trident watchlist delete NAME
+
+trident db upgrade                      # alembic upgrade head
+```
+
 ## Project layout
 
 ```
@@ -180,23 +275,29 @@ src/trident/
   settings.py          # pydantic-settings, loads .env
   clock.py             # market hours / holidays / early closes
   watchlist.py         # WATCHLIST constant + DB-backed resolve_watchlist()
+  cli.py               # `trident` CLI entry point (Typer); wraps scripts + package functions
   data/                # WebSocket feed + bar store + bar persistence + backfill
   strategies/          # Strategy protocol, registry, ORB + VWAP-reversion, management
   risk/                # the pre-trade gate, sizing, and limits
   execution/           # Broker protocol + Alpaca adapter + bracket/single-leg orders
   portfolio/           # order tracking + position reconciliation + management
   accounting/          # pure round-trip + wash-sale computation
-  screener/            # stock-screener criteria + filter/rank engine
+  screener/            # stock-screener: criteria, engine, FMP universe layer,
+                       #   managed presets (fmp.py, presets.py, data.py, …)
   suggest/             # AI pre-market stock suggestions
   safety/              # EOD flatten
   backtest/            # fill simulator + honest backtest + strategy comparison
   audit/               # append-only event log + structured logging
-  persistence/         # SQLAlchemy models + migrations + kill switch state
+  persistence/         # SQLAlchemy models + migrations + kill switch state +
+                       #   screen_presets_store.py, watchlist_store.py, …
   dashboard/           # FastAPI + HTMX dashboard (localhost only)
 tests/unit/            # pure-function tests for the safety-critical code
 scripts/               # smoke_test, shadow_run, replay, backtest, compare,
                        # paper_run, deadman, run_dashboard, backfill_daily,
-                       # screen, suggest
+                       # screen, suggest,
+                       # postgres_up.sh (create-or-start the Docker container),
+                       # run_shadow_scheduled.sh (cron launcher, 09:20 ET weekdays),
+                       # start.sh / stop.sh (systemd service helpers)
 ```
 
 ## Roadmap

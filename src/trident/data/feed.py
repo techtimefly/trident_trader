@@ -4,9 +4,13 @@ import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from trident.audit.log import get_logger
 from trident.data.bars import Bar, BarStore
+
+if TYPE_CHECKING:
+    from alpaca.data.live import StockDataStream
 
 log = get_logger("data.feed")
 
@@ -35,7 +39,7 @@ class AlpacaBarFeed:
         self._store = store
         self._feed = feed
         self._handlers: list[BarHandler] = []
-        self._client = None  # lazy: import alpaca only when run
+        self._client: StockDataStream | None = None  # lazy import in run()
 
     def on_bar(self, handler: BarHandler) -> None:
         self._handlers.append(handler)
@@ -69,7 +73,20 @@ class AlpacaBarFeed:
         )
         self._client.subscribe_bars(self._handle_raw_bar, *self._symbols)
         log.info("feed_starting", symbols=self._symbols, feed=self._feed)
-        await self._client._run_forever()  # type: ignore[attr-defined]
+        await self._client._run_forever()
+
+    async def stop(self) -> None:
+        """Signal the websocket loop to exit cleanly so ``run()`` returns.
+
+        Cancelling the ``run()`` task is not enough: alpaca-py's
+        ``_run_forever`` catches broad exceptions to reconnect, so a bare
+        cancel leaves the stream alive and ``asyncio.run()`` hanging during
+        shutdown. ``stop_ws()`` clears the stream's ``_should_run`` flag and
+        enqueues a stop message — the loop's designed exit path, which also
+        closes the socket. A no-op if ``run()`` has not started yet.
+        """
+        if self._client is not None:
+            await self._client.stop_ws()
 
 
 def synthetic_bars(

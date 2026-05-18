@@ -4,14 +4,19 @@ This is the only module in :mod:`trident.suggest` that touches the network.
 All pure logic — prompt construction and response parsing — lives in
 :mod:`trident.suggest.prompt`; this module just wires it to the Anthropic SDK.
 
-**Graceful degradation is the headline behaviour.** When no API key is
-configured (the common case in this environment), :func:`suggest_stocks`
-returns a clear not-ok :class:`~trident.suggest.suggestion.SuggestionResult`
-instead of raising. An API error or an unparseable response degrades the same
-way. The feature is advisory and outer-ring — it must never crash a caller.
+**Graceful degradation is the headline behaviour.** When no credentials are
+configured, :func:`suggest_stocks` returns a clear not-ok
+:class:`~trident.suggest.suggestion.SuggestionResult` instead of raising.
+An API error or an unparseable response degrades the same way. The feature is
+advisory and outer-ring — it must never crash a caller.
+
+Credentials are resolved in priority order by the Anthropic SDK:
+``ANTHROPIC_API_KEY`` (pay-per-token) → ``CLAUDE_CODE_OAUTH_TOKEN`` (Claude
+Code subscription). Set either one; do not pass both.
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from typing import Any
 
@@ -30,22 +35,31 @@ from trident.suggest.suggestion import PlanContext, SuggestionResult
 log = get_logger("suggest.client")
 
 # A personal-tool pre-market precheck: a short suggestion list with brief
-# rationales. claude-sonnet-4-6 is the sensible default for this — capable,
-# fast, and cost-efficient for a low-stakes advisory summary that one user
-# reads once a day.
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# rationales. claude-haiku-4-5-20251001 is used when authenticating via the
+# Claude Code subscription (CLAUDE_CODE_OAUTH_TOKEN); Sonnet hits the
+# subscription's API rate cap. With a paid ANTHROPIC_API_KEY, any model works.
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 # The suggestion JSON is small; this ceiling is generous headroom and keeps
 # the request well under any SDK HTTP timeout (no streaming needed).
 _MAX_TOKENS = 1024
 
 
-def _build_client(api_key: str) -> Any:
+def _build_client(api_key: str, oauth_token: str) -> Any:
     """Construct the Anthropic SDK client. Import is local so the SDK is only
-    needed when a key is actually present."""
+    needed when credentials are actually present.
+
+    The SDK reads ``ANTHROPIC_API_KEY`` and ``ANTHROPIC_AUTH_TOKEN`` from the
+    environment. ``CLAUDE_CODE_OAUTH_TOKEN`` is a Claude Code convention that
+    the SDK does not read directly, so we pass it explicitly as ``auth_token``.
+    """
     import anthropic
 
-    return anthropic.Anthropic(api_key=api_key)
+    if api_key:
+        return anthropic.Anthropic(api_key=api_key)
+    if oauth_token:
+        return anthropic.Anthropic(auth_token=oauth_token)
+    return anthropic.Anthropic()
 
 
 def _extract_text(response: Any) -> str:
@@ -70,7 +84,7 @@ def suggest_stocks(
     suggestions on success, and a **not-ok degraded** result in every failure
     mode — this function does not raise:
 
-    - no ``ANTHROPIC_API_KEY`` configured  -> not-ok, clear notice
+    - no credentials configured            -> not-ok, clear notice
     - no screener candidates to review     -> not-ok, clear notice
     - the Anthropic API errors             -> not-ok, error logged
     - the model reply will not parse       -> not-ok, clear notice
@@ -85,11 +99,13 @@ def suggest_stocks(
     """
     settings = get_settings()
     api_key = settings.anthropic_api_key.strip()
-    if not api_key:
-        log.info("suggest_no_api_key")
+    oauth_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
+    if not api_key and not oauth_token:
+        log.info("suggest_no_credentials")
         return SuggestionResult.degraded(
-            "No ANTHROPIC_API_KEY configured — AI suggestions are unavailable. "
-            "Set the key to enable the pre-market precheck."
+            "No Anthropic credentials configured — AI suggestions are unavailable. "
+            "Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN to enable the "
+            "pre-market precheck."
         )
 
     if not has_candidates(candidates):
@@ -101,7 +117,7 @@ def suggest_stocks(
 
     user_prompt = build_user_prompt(candidates, plan, max_suggestions=max_suggestions)
     try:
-        client = _build_client(api_key)
+        client = _build_client(api_key, oauth_token)
         response = client.messages.create(
             model=model,
             max_tokens=_MAX_TOKENS,

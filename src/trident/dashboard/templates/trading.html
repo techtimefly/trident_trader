@@ -1,0 +1,71 @@
+{% extends "_layout.html" %}
+{% block title %}Trading — Trident Trader{% endblock %}
+
+{% block sidebar %}
+<div>
+    <div class="nav-group px-2 mb-1">Live trading</div>
+    <a class="nav-link" href="#panel-positions">Open positions</a>
+    <a class="nav-link" href="#panel-signals">Today's signals</a>
+    <a class="nav-link" href="#panel-orders">Today's orders</a>
+    <a class="nav-link" href="#panel-manage">Manual controls</a>
+</div>
+{% endblock %}
+
+{% block main %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <section id="panel-positions" class="panel">
+        <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+            <h2 class="text-sm font-semibold tracking-tight">Open positions</h2>
+            <span class="pill pill-dim">live from alpaca</span>
+        </div>
+        <div
+            id="positions"
+            hx-get="/api/positions"
+            hx-trigger="load, every 5s"
+            hx-swap="innerHTML">
+            <div class="skeleton h-16 m-4 rounded-md"></div>
+        </div>
+    </section>
+
+    <section id="panel-signals" class="panel">
+        <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+            <h2 class="text-sm font-semibold tracking-tight">Today's signals</h2>
+        </div>
+        <div
+            id="signals"
+            hx-get="/api/signals"
+            hx-trigger="load, every 5s"
+            hx-swap="innerHTML">
+            <div class="skeleton h-16 m-4 rounded-md"></div>
+        </div>
+    </section>
+</div>
+
+<section id="panel-orders" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Today's orders</h2>
+        <span class="pill pill-dim">paper account</span>
+    </div>
+    <div
+        id="orders"
+        hx-get="/api/orders"
+        hx-trigger="load, every 5s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-16 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-manage" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Manual controls</h2>
+        <span class="pill pill-amber">overrides</span>
+    </div>
+    <div
+        id="manage"
+        hx-get="/api/manage"
+        hx-trigger="load, every 30s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-24 m-4 rounded-md"></div>
+    </div>
+</section>
+{% endblock %}

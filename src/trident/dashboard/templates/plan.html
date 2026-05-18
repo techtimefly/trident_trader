@@ -1,0 +1,40 @@
+{% extends "_layout.html" %}
+{% block title %}Plan — Trident Trader{% endblock %}
+
+{% block sidebar %}
+<div>
+    <div class="nav-group px-2 mb-1">Plan</div>
+    <a class="nav-link" href="#panel-daily-plan">Today's plan</a>
+    <a class="nav-link" href="#panel-watchlist">Watchlists</a>
+</div>
+{% endblock %}
+
+{% block main %}
+<section id="panel-daily-plan" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Today's plan</h2>
+        <span class="pill pill-dim">capital budget &middot; day-trades</span>
+    </div>
+    <div
+        id="daily-plan"
+        hx-get="/api/daily-plan"
+        hx-trigger="load, every 30s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-24 m-4 rounded-md"></div>
+    </div>
+</section>
+
+<section id="panel-watchlist" class="panel">
+    <div class="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+        <h2 class="text-sm font-semibold tracking-tight">Watchlists</h2>
+        <span class="pill pill-dim">named lists &middot; the active one trades</span>
+    </div>
+    <div
+        id="watchlist"
+        hx-get="/api/watchlist"
+        hx-trigger="load, every 30s"
+        hx-swap="innerHTML">
+        <div class="skeleton h-24 m-4 rounded-md"></div>
+    </div>
+</section>
+{% endblock %}

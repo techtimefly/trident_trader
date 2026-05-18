@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A personal automated day-trading bot. **Paper trading only.** Single user, single
-watchlist, intentionally minimal — the README is for humans setting up the project;
+A personal automated day-trading bot. **Paper trading only.** Single user,
+intentionally minimal — the README is for humans setting up the project;
 this file is for agents changing it. The win conditions are correctness and
 discipline, not feature breadth or returns.
 
@@ -70,7 +70,7 @@ optional `manage()` method, translating `ManagementAction`s into broker calls.
 - **Middle ring — failures degrade the product, not capital.**
   `src/trident/strategies/`, `src/trident/data/`, `src/trident/persistence/`.
 - **Outer ring — can fail without losing money.** `src/trident/dashboard/`,
-  `src/trident/backtest/`.
+  `src/trident/backtest/`, `src/trident/screener/`, `src/trident/suggest/`.
 
 `src/trident/risk/gate.py` is the single most important file: a pure function,
 first-failure short-circuit, reject-on-doubt. Every branch is unit-tested. Change
@@ -80,6 +80,10 @@ it carefully.
 
 - `scripts/shadow_run.py` — live data, signals + gate evaluated, **never submits
   orders**.
+- `scripts/run_shadow_scheduled.sh` — cron launcher for `shadow_run.py`. Guards
+  against weekends, NYSE holidays, duplicate starts, and Postgres being down. Runs
+  for up to 7 hours then exits via SIGTERM. Note: Debian vixie-cron ignores
+  `CRON_TZ` for scheduling; the cron entry time must be server-local, not ET.
 - `scripts/paper_run.py` — submits bracket orders to the **paper** account. Refuses
   non-paper Alpaca URLs at construction (`AlpacaBroker.__init__`).
 - `scripts/deadman.py` — a **separate process** (intentionally not in-process with
@@ -109,19 +113,25 @@ There is no `live_run.py`. Do not create one without explicit direction.
   state, write a new event.
 - The **kill switch** lives in the `system_state` table; the dashboard toggles it
   and the runner reads it before every gate evaluation, no restart needed.
-- The **watchlist is owned by `src/trident/watchlist.py`.** Runners call
-  `resolve_watchlist()`, which reads the most-recently-activated row from the
-  `watchlists` table and falls back to the static `WATCHLIST` constant if no active
-  row exists (never resolves to empty). The dashboard's `/api/watchlist` panel
-  edits it.
+- **Watchlists are multiple and named.** Several named watchlists coexist in the
+  `watchlists` table (unique `name`); exactly one is `is_active`. CRUD lives in
+  `src/trident/persistence/watchlist_store.py` (`create_watchlist`,
+  `rename_watchlist`, `delete_watchlist`, `activate_watchlist`, `add_symbols`,
+  `remove_symbol`, `set_watchlist_symbols`, `list_watchlists`, `get_watchlist`,
+  `get_active_watchlist`). Runners call `resolve_watchlist()` in
+  `src/trident/watchlist.py`, which reads the **active** watchlist and falls back to
+  the static `WATCHLIST` constant if no active row exists, the active list is
+  empty, or the DB is unavailable (never resolves to empty). The dashboard's
+  `/api/watchlist` panel manages every named list; the screener can add results to
+  any of them.
 
 ## Common commands
 
 ```bash
 # Setup (one-time)
-docker-compose up -d postgres
-pip install -e ".[dev]"
-alembic upgrade head
+docker compose up -d postgres
+pip install -e ".[dev]"   # also installs the `trident` CLI entry point
+alembic upgrade head      # or: trident db upgrade
 
 # Tests — must pass before any commit; run in <1s, no network/DB needed
 PYTHONPATH=src python -m pytest tests/unit -q
@@ -136,17 +146,50 @@ ruff check src tests
 mypy src
 
 # Smoke test (checks DB + Alpaca credentials; submits nothing)
-PYTHONPATH=src python scripts/smoke_test.py
+PYTHONPATH=src python scripts/smoke_test.py   # or: trident smoke
 
 # Replay historical days (writes to DB; dashboard picks it up)
 PYTHONPATH=src python scripts/replay.py --days 90
 PYTHONPATH=src python scripts/replay.py --date 2026-05-12 --no-persist
+# or: trident replay --days 90
+# or: trident replay --date 2026-05-12 --no-persist
 
 # Shadow runner (live data, no orders)
-PYTHONPATH=src python scripts/shadow_run.py
+PYTHONPATH=src python scripts/shadow_run.py   # or: trident run shadow
 
 # Dashboard (then open http://127.0.0.1:8765)
-PYTHONPATH=src python scripts/run_dashboard.py
+PYTHONPATH=src python scripts/run_dashboard.py   # or: trident run dashboard
+```
+
+The `trident` CLI is a convenience wrapper installed by `pip install -e ".[dev]"`.
+The underlying `scripts/*.py` files are unchanged and still work. Use whichever
+form you prefer; they are equivalent.
+
+Full CLI reference:
+
+```bash
+trident run shadow [--strategy S]       # live data, no orders
+trident run paper  [--strategy S] [-y]  # paper orders (prompts unless -y)
+trident run dashboard                   # FastAPI on :8765
+
+trident replay   [--date D] [--days N] [--equity N] [--strategy S] [--no-persist]
+trident backtest [--date D] [--days N] [--window-days N] [--slippage-bps N] ...
+trident compare  [--date D] [--days N] [--strategy S ...]
+trident screen   [--preset N] [--min-price N] [--max-price N] [--min-change N] ...
+trident suggest  [--max N]
+
+trident smoke                           # DB + Alpaca credential check
+trident status                          # DB / Alpaca / kill switch / watchlist / heartbeat
+
+trident kill-switch on|off              # toggle without the dashboard
+trident watchlist                       # list all named watchlists
+trident watchlist add AAPL NVDA
+trident watchlist remove AAPL
+trident watchlist activate NAME
+trident watchlist create NAME [SYMS...]
+trident watchlist delete NAME
+
+trident db upgrade                      # alembic upgrade head
 ```
 
 After any persistence-model change, run `alembic upgrade head` before restarting
@@ -155,7 +198,7 @@ exist".
 
 ## Test policy
 
-- ~319 unit tests; they run in <1s and need no network or database.
+- 378 unit tests; they run in <1s and need no network or database.
 - Risk gate, position sizing, ORB, EOD timing, and the fill simulator have
   exhaustive branch coverage.
 - Inner-ring code (gate, execution, safety, portfolio) must ship with tests in the
@@ -181,6 +224,27 @@ exist".
 6. **Notional cap sizes down, doesn't reject.** When the risk-budget share count
    exceeds the `max_position_notional_pct` cap, take `min(by_risk, by_notional)`.
    Reject only if even one share blows the cap.
+7. **Dashboard settings panel writes `.env` directly.** `src/trident/dashboard/settings_io.py`
+   (`rewrite_env`) edits the project `.env` in-place. The settings endpoint calls
+   `get_settings.cache_clear()` so the panel re-renders with fresh values, but
+   runners and the dashboard process itself only pick up the changes on the next
+   restart. API key, feed, and operational fields require a restart; risk and
+   backtest-cost fields take effect immediately on the next gate evaluation.
+8. **FMP apikey leaks into logs via httpx.** FMP authenticates with an `?apikey=`
+   query parameter. `httpx` logs every request at INFO, which would write the key
+   in plaintext. `audit/log.py`'s `configure_logging()` raises the `httpx` logger
+   to WARNING; any new logging setup must preserve this. The FMP integration in
+   `screener/fmp.py` is the only place that calls FMP.
+9. **AI suggestion credentials — two paths.** `suggest/client.py` accepts either
+   `ANTHROPIC_API_KEY` (pay-per-token) or `CLAUDE_CODE_OAUTH_TOKEN` (Claude Code
+   subscription). If neither is set the feature degrades gracefully (not-ok result,
+   no crash). The SDK does not read `CLAUDE_CODE_OAUTH_TOKEN` natively; the client
+   passes it explicitly as `auth_token`. Never put model identifiers in docs or
+   committed files.
+10. **SIGTERM shutdown needs `feed.stop()`.** Cancelling the `feed_task` directly
+   leaves alpaca-py's `_run_forever` loop running and `asyncio.run()` hanging.
+   Always call `await feed.stop()` (uses `stop_ws()`) before cancelling other tasks;
+   both `shadow_run.py` and `paper_run.py` follow this order.
 
 ## Style & conventions
 

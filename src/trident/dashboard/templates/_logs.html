@@ -1,0 +1,63 @@
+{% if load_error %}
+<div class="empty">Could not read the log directory.</div>
+{% elif not files %}
+<div class="empty">No log files found in <span class="mono">{{ settings_log_dir }}</span>. Runner output is redirected to files by <span class="mono">run_shadow_scheduled.sh</span>.</div>
+{% else %}
+<div class="p-4 space-y-3"
+     hx-get="/api/logs{% if selected %}?file={{ selected }}{% endif %}"
+     hx-trigger="every 5s"
+     hx-target="#logs"
+     hx-swap="innerHTML">
+
+    {% if files | length > 1 %}
+    <div class="flex items-center gap-2">
+        <label class="text-xs dim uppercase tracking-widest shrink-0">File</label>
+        <select name="file" onchange="htmx.ajax('GET', '/api/logs?file=' + this.value, {target: '#logs', swap: 'innerHTML'})"
+                class="mono text-xs bg-[var(--panel-2)] border border-[var(--border)] rounded px-2 py-1">
+            {% for f in files %}
+            <option value="{{ f }}" {% if f == selected %}selected{% endif %}>{{ f }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% else %}
+    <div class="text-xs dim mono">{{ selected }}</div>
+    {% endif %}
+
+    <div class="mono text-xs overflow-y-auto max-h-[28rem] space-y-px" id="log-scroll">
+        {% if not lines %}
+        <div class="dim py-4 text-center">File is empty.</div>
+        {% endif %}
+        {% for ln in lines %}
+        <div class="flex items-baseline gap-2 leading-5
+                    {% if ln.level == 'error' or ln.level == 'critical' %}text-[var(--red)]
+                    {% elif ln.level == 'warning' %}text-[var(--amber)]
+                    {% else %}{% endif %}">
+            {% if ln.is_json %}
+            <span class="dim shrink-0 w-[11ch]">{{ ln.ts[11:] }}</span>
+            {% if ln.level == 'error' or ln.level == 'critical' %}
+            <span class="pill pill-red shrink-0 text-[0.6rem]">{{ ln.level }}</span>
+            {% elif ln.level == 'warning' %}
+            <span class="pill pill-amber shrink-0 text-[0.6rem]">{{ ln.level }}</span>
+            {% else %}
+            <span class="w-[3ch] shrink-0"></span>
+            {% endif %}
+            <span>{{ ln.event }}</span>
+            {% if ln.detail %}<span class="dim">{{ ln.detail }}</span>{% endif %}
+            {% else %}
+            <span class="dim shrink-0 w-[11ch]"></span>
+            <span class="w-[3ch] shrink-0"></span>
+            <span class="dim">{{ ln.event }}</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+{% endif %}
+
+<script>
+    (function () {
+        var el = document.getElementById('log-scroll');
+        if (el) el.scrollTop = el.scrollHeight;
+    })();
+</script>

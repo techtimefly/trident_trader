@@ -1,3 +1,25 @@
+{# Pre-market check button — always shown so the user can trigger a fresh run #}
+<div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between gap-3">
+    <span class="text-xs dim">Screen + AI suggestions in one step</span>
+    {% if checking %}
+    <button class="btn btn-ghost text-sm" disabled style="opacity:0.5;cursor:not-allowed;">
+        ⟳ Running…
+    </button>
+    {% else %}
+    <button class="btn btn-ghost text-sm"
+            hx-post="/api/premarket/run"
+            hx-target="#suggest"
+            hx-swap="innerHTML">
+        Run pre-market check
+    </button>
+    {% endif %}
+</div>
+{% if notice %}
+<div class="px-5 py-2 text-xs {% if notice_error %}text-red-400{% else %}text-green-400{% endif %}">
+    {{ notice }}
+</div>
+{% endif %}
+
 {% if load_error %}
 <div class="empty">Could not load AI suggestions. Check the database connection.</div>
 {% elif run %}
@@ -44,9 +66,5 @@
 {% endif %}
 
 {% else %}
-<div class="empty">
-    No AI suggestion run yet. Run
-    <span class="mono">PYTHONPATH=src python scripts/suggest.py</span>
-    (needs a screen and an <span class="mono">ANTHROPIC_API_KEY</span>) and refresh.
-</div>
+<div class="empty">No suggestion run yet — click <strong>Run pre-market check</strong> above.</div>
 {% endif %}

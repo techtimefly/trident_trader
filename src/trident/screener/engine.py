@@ -15,9 +15,13 @@ from trident.screener.criteria import ScreenCandidate, ScreenCriteria, ScreenRes
 def passes(candidate: ScreenCandidate, criteria: ScreenCriteria) -> bool:
     """True iff ``candidate`` satisfies every active bound in ``criteria``.
 
-    All bounds are inclusive; a ``None`` bound is skipped. With an empty
-    ``ScreenCriteria()`` every candidate passes. Short-circuits on the first
-    failed bound.
+    All numeric bounds are inclusive; a ``None`` bound (or an empty ``sectors``
+    / ``exchanges`` tuple) is skipped. With an empty ``ScreenCriteria()`` every
+    candidate passes. Short-circuits on the first failed bound.
+
+    Market-cap, sector, and exchange are FMP-sourced metadata: when a bound on
+    one of them is active but the candidate carries no such value, the
+    candidate is rejected (reject-on-doubt — we cannot prove it passes).
     """
     if criteria.min_price is not None and candidate.price < criteria.min_price:
         return False
@@ -30,10 +34,22 @@ def passes(candidate: ScreenCandidate, criteria: ScreenCriteria) -> bool:
         and candidate.change_pct < criteria.min_change_pct
     ):
         return False
-    return not (
+    if (
         criteria.max_change_pct is not None
         and candidate.change_pct > criteria.max_change_pct
-    )
+    ):
+        return False
+    if criteria.min_market_cap is not None and (
+        candidate.market_cap is None or candidate.market_cap < criteria.min_market_cap
+    ):
+        return False
+    if criteria.max_market_cap is not None and (
+        candidate.market_cap is None or candidate.market_cap > criteria.max_market_cap
+    ):
+        return False
+    if criteria.sectors and candidate.sector not in criteria.sectors:
+        return False
+    return not (criteria.exchanges and candidate.exchange not in criteria.exchanges)
 
 
 def rank(candidates: Iterable[ScreenCandidate]) -> tuple[ScreenCandidate, ...]:

@@ -46,6 +46,12 @@ def save_screen(
                 min_avg_volume=crit.min_avg_volume,
                 min_change_pct=crit.min_change_pct,
                 max_change_pct=crit.max_change_pct,
+                min_market_cap=crit.min_market_cap,
+                max_market_cap=crit.max_market_cap,
+                # An empty allow-list is stored as NULL — "no bound", like the
+                # numeric columns.
+                sectors=list(crit.sectors) or None,
+                exchanges=list(crit.exchanges) or None,
             )
         )
         for idx, cand in enumerate(result.matches, start=1):
@@ -122,6 +128,10 @@ def get_latest_screen() -> LatestScreen | None:
                 min_avg_volume=run.min_avg_volume,
                 min_change_pct=run.min_change_pct,
                 max_change_pct=run.max_change_pct,
+                min_market_cap=run.min_market_cap,
+                max_market_cap=run.max_market_cap,
+                sectors=tuple(run.sectors or ()),
+                exchanges=tuple(run.exchanges or ()),
             ),
             matches=tuple(
                 ScreenCandidate(

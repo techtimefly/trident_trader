@@ -24,6 +24,12 @@ def configure_logging() -> None:
         stream=sys.stdout,
     )
 
+    # httpx logs every request at INFO as "HTTP Request: GET <full-url> ...".
+    # FMP authenticates with an ?apikey= query parameter, so that line would
+    # write the API key to the logs in plaintext. Raise httpx to WARNING so the
+    # per-request line is suppressed; real httpx problems still surface.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,

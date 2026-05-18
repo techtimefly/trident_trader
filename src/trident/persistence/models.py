@@ -297,12 +297,17 @@ class ScreenRun(Base):
     scanned: Mapped[int] = mapped_column()  # symbols with usable bar data
     matched: Mapped[int] = mapped_column()  # symbols passing every filter
     lookback_days: Mapped[int] = mapped_column()
-    # Filter bounds — NULL means that bound was not applied.
+    # Filter bounds — NULL (or NULL JSON) means that bound was not applied.
     min_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     max_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     min_avg_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     min_change_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     max_change_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    # FMP-sourced filter bounds (added in migration 0007).
+    min_market_cap: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    max_market_cap: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    sectors: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    exchanges: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     results: Mapped[list[ScreenResultRow]] = relationship(back_populates="run")
 
@@ -384,6 +389,31 @@ class Watchlist(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScreenPreset(Base):
+    """A named, reusable set of screener filter bounds — managed config.
+
+    ``criteria`` is a JSON object: a serialized
+    :class:`~trident.screener.criteria.ScreenCriteria` (see
+    ``screen_presets_store.criteria_to_json``). ``lookback_days`` travels with
+    the preset because the average-volume / % change window is part of the
+    filter set. Exactly one row has ``is_active`` True at a time — that is the
+    preset ``resolve_screen_criteria()`` returns. ``source`` is ``"static"``
+    (seeded default) or ``"manual"`` (dashboard / CLI edit). ``name`` is unique.
+    """
+
+    __tablename__ = "screen_presets"
+    __table_args__ = (UniqueConstraint("name", name="uq_screen_presets_name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    criteria: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    lookback_days: Mapped[int] = mapped_column(nullable=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

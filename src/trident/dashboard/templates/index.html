@@ -26,9 +26,10 @@
             --indigo: #818cf8;
         }
         html, body { background: var(--bg); color: var(--text); }
+        html { scroll-behavior: smooth; }
         body { font-family: 'Inter', system-ui, sans-serif; }
         .mono { font-family: 'Geist Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
-        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; scroll-margin-top: 1.25rem; }
         .panel-2 { background: var(--panel-2); }
         .dim { color: var(--text-dim); }
         .pos { color: var(--green); }
@@ -66,6 +67,18 @@
         .skeleton { background: linear-gradient(90deg, var(--panel-2) 0%, #1f1f25 50%, var(--panel-2) 100%); background-size: 200% 100%; animation: shimmer 1.6s infinite; }
         @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
         .empty { color: var(--text-dim); font-size: 0.9rem; padding: 1.5rem; text-align: center; }
+        .nav-group { font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+        .nav-link {
+            display: block; padding: 0.3rem 0.6rem; border-radius: 6px;
+            font-size: 0.82rem; color: var(--text-dim);
+            border-left: 2px solid transparent;
+            transition: background 0.12s ease, color 0.12s ease;
+        }
+        .nav-link:hover { background: var(--panel-2); color: var(--text); }
+        .nav-link.active {
+            background: var(--panel-2); color: var(--indigo);
+            border-left-color: var(--indigo);
+        }
     </style>
 </head>
 <body class="min-h-screen">
@@ -78,7 +91,45 @@
         <div class="text-sm dim mono" id="clock"></div>
     </header>
 
-    <main class="px-6 py-6 max-w-7xl mx-auto space-y-6">
+    <div class="max-w-7xl mx-auto flex gap-6 px-6 py-6">
+        <aside class="hidden lg:block w-52 shrink-0">
+            <nav class="sticky top-6 space-y-4">
+                <div>
+                    <div class="nav-group px-2 mb-1">Overview</div>
+                    <a class="nav-link" href="#hero">Account &amp; status</a>
+                </div>
+                <div>
+                    <div class="nav-group px-2 mb-1">Plan</div>
+                    <a class="nav-link" href="#panel-daily-plan">Today's plan</a>
+                    <a class="nav-link" href="#panel-watchlist">Watchlist</a>
+                </div>
+                <div>
+                    <div class="nav-group px-2 mb-1">Live trading</div>
+                    <a class="nav-link" href="#panel-positions">Open positions</a>
+                    <a class="nav-link" href="#panel-signals">Today's signals</a>
+                    <a class="nav-link" href="#panel-orders">Today's orders</a>
+                    <a class="nav-link" href="#panel-pnl">Trade P&amp;L</a>
+                    <a class="nav-link" href="#panel-manage">Manual controls</a>
+                </div>
+                <div>
+                    <div class="nav-group px-2 mb-1">Strategy</div>
+                    <a class="nav-link" href="#panel-replay">Latest replay</a>
+                    <a class="nav-link" href="#panel-compare">Strategy comparison</a>
+                </div>
+                <div>
+                    <div class="nav-group px-2 mb-1">Screener</div>
+                    <a class="nav-link" href="#panel-screen-presets">Screen filters</a>
+                    <a class="nav-link" href="#panel-screen">Latest screen</a>
+                    <a class="nav-link" href="#panel-suggest">AI suggestions</a>
+                </div>
+                <div>
+                    <div class="nav-group px-2 mb-1">Audit</div>
+                    <a class="nav-link" href="#panel-audit">Recent events</a>
+                </div>
+            </nav>
+        </aside>
+
+        <main class="flex-1 min-w-0 space-y-6">
         <section
             id="hero"
             class="panel p-6"
@@ -88,7 +139,7 @@
             <div class="skeleton h-24 rounded-md"></div>
         </section>
 
-        <section class="panel">
+        <section id="panel-daily-plan" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <h2 class="text-sm font-semibold tracking-tight">Today's plan</h2>
@@ -104,7 +155,7 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section id="panel-watchlist" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <h2 class="text-sm font-semibold tracking-tight">Watchlist</h2>
@@ -121,7 +172,7 @@
         </section>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <section class="panel">
+            <section id="panel-positions" class="panel">
                 <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                     <div class="flex items-center gap-2">
                         <h2 class="text-sm font-semibold tracking-tight">Open positions</h2>
@@ -137,7 +188,7 @@
                 </div>
             </section>
 
-            <section class="panel">
+            <section id="panel-signals" class="panel">
                 <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                     <div class="flex items-center gap-2">
                         <h2 class="text-sm font-semibold tracking-tight">Today's signals</h2>
@@ -153,7 +204,7 @@
             </section>
         </div>
 
-        <section class="panel">
+        <section id="panel-orders" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <h2 class="text-sm font-semibold tracking-tight">Today's orders</h2>
@@ -169,7 +220,7 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section id="panel-pnl" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <h2 class="text-sm font-semibold tracking-tight">Trade P&amp;L</h2>
@@ -185,7 +236,7 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section id="panel-manage" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <h2 class="text-sm font-semibold tracking-tight">Manual controls</h2>
@@ -201,7 +252,7 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section id="panel-replay" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <h2 class="text-sm font-semibold tracking-tight">Latest replay</h2>
@@ -217,7 +268,7 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section id="panel-compare" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <h2 class="text-sm font-semibold tracking-tight">Strategy comparison</h2>
@@ -233,7 +284,23 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section id="panel-screen-presets" class="panel">
+            <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <h2 class="text-sm font-semibold tracking-tight">Screen filters</h2>
+                    <span class="pill pill-dim">managed &middot; editable</span>
+                </div>
+            </div>
+            <div
+                id="screen-presets"
+                hx-get="/api/screen-presets"
+                hx-trigger="load"
+                hx-swap="innerHTML">
+                <div class="skeleton h-32 m-4 rounded-md"></div>
+            </div>
+        </section>
+
+        <section id="panel-screen" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <h2 class="text-sm font-semibold tracking-tight">Latest screen</h2>
@@ -249,7 +316,7 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section id="panel-suggest" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <h2 class="text-sm font-semibold tracking-tight">AI stock suggestions</h2>
@@ -265,7 +332,7 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section id="panel-audit" class="panel">
             <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
                 <h2 class="text-sm font-semibold tracking-tight">Recent audit events</h2>
                 <span class="pill pill-dim">last 24h</span>
@@ -282,7 +349,8 @@
         <footer class="text-xs dim text-center py-8">
             Not investment advice. Paper trading only. Equity / positions are read from your Alpaca paper account.
         </footer>
-    </main>
+        </main>
+    </div>
 
     <script>
         function tickClock() {
@@ -293,6 +361,32 @@
         }
         tickClock();
         setInterval(tickClock, 1000);
+
+        // Scroll-spy: highlight the sidebar link for whichever panel is
+        // currently near the top of the viewport.
+        (function () {
+            const links = document.querySelectorAll('.nav-link');
+            if (!links.length || !('IntersectionObserver' in window)) return;
+            const byId = {};
+            links.forEach(function (a) {
+                byId[a.getAttribute('href').slice(1)] = a;
+            });
+            let current = null;
+            const obs = new IntersectionObserver(function (entries) {
+                entries.forEach(function (e) {
+                    if (!e.isIntersecting) return;
+                    const link = byId[e.target.id];
+                    if (!link || link === current) return;
+                    if (current) current.classList.remove('active');
+                    link.classList.add('active');
+                    current = link;
+                });
+            }, { rootMargin: '0px 0px -70% 0px' });
+            Object.keys(byId).forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) obs.observe(el);
+            });
+        })();
     </script>
 </body>
 </html>

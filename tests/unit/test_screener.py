@@ -4,6 +4,7 @@ No network, no database — only the pure value objects and filter/rank function
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 
 from trident.screener.criteria import ScreenCandidate, ScreenCriteria, ScreenResult
@@ -15,12 +16,18 @@ def _cand(
     price: str = "10.00",
     avg_volume: int = 1_000_000,
     change_pct: str = "0.00",
+    market_cap: int | None = None,
+    sector: str | None = None,
+    exchange: str | None = None,
 ) -> ScreenCandidate:
     return ScreenCandidate(
         symbol=symbol,
         price=Decimal(price),
         avg_volume=avg_volume,
         change_pct=Decimal(change_pct),
+        market_cap=market_cap,
+        sector=sector,
+        exchange=exchange,
     )
 
 
@@ -47,6 +54,21 @@ def test_describe_lists_active_bounds() -> None:
     assert "avg vol >= 2,000,000" in text
     assert "change >= -3%" in text
     assert "change <= 8%" in text
+
+
+def test_describe_lists_fmp_bounds() -> None:
+    crit = ScreenCriteria(
+        min_market_cap=1_000_000,
+        max_market_cap=5_000_000_000,
+        sectors=("Technology", "Healthcare"),
+        exchanges=("NASDAQ",),
+    )
+    text = crit.describe()
+    assert "mkt cap >= $1,000,000" in text
+    assert "mkt cap <= $5,000,000,000" in text
+    assert "Technology" in text
+    assert "Healthcare" in text
+    assert "NASDAQ" in text
 
 
 def test_criteria_is_frozen() -> None:
@@ -134,6 +156,77 @@ def test_all_bounds_must_pass_together() -> None:
     assert passes(_cand(price="50", avg_volume=900_000), crit) is False
     # Passes all three.
     assert passes(_cand(price="5", avg_volume=900_000), crit) is True
+
+
+# --------------------------------------------------------------------------
+# passes() — FMP-sourced bounds: market cap, sector, exchange
+# --------------------------------------------------------------------------
+
+
+def test_min_market_cap_bound() -> None:
+    crit = ScreenCriteria(min_market_cap=1_000_000_000)
+    assert passes(_cand(market_cap=999_999_999), crit) is False
+    assert passes(_cand(market_cap=1_000_000_000), crit) is True  # inclusive
+    assert passes(_cand(market_cap=2_000_000_000), crit) is True
+
+
+def test_max_market_cap_bound() -> None:
+    crit = ScreenCriteria(max_market_cap=10_000_000_000)
+    assert passes(_cand(market_cap=10_000_000_001), crit) is False
+    assert passes(_cand(market_cap=10_000_000_000), crit) is True  # inclusive
+    assert passes(_cand(market_cap=5_000_000_000), crit) is True
+
+
+def test_market_cap_bound_rejects_missing_metadata() -> None:
+    """Reject-on-doubt: no market_cap, but a market-cap bound is active."""
+    assert passes(_cand(market_cap=None), ScreenCriteria(min_market_cap=1)) is False
+    assert passes(_cand(market_cap=None), ScreenCriteria(max_market_cap=10**12)) is False
+    # No bound on market cap -> missing metadata is fine.
+    assert passes(_cand(market_cap=None), ScreenCriteria()) is True
+
+
+def test_sectors_allowlist() -> None:
+    crit = ScreenCriteria(sectors=("Technology", "Healthcare"))
+    assert passes(_cand(sector="Technology"), crit) is True
+    assert passes(_cand(sector="Healthcare"), crit) is True
+    assert passes(_cand(sector="Energy"), crit) is False
+    assert passes(_cand(sector=None), crit) is False  # reject-on-doubt
+    # Empty allow-list = no bound, so missing metadata is fine.
+    assert passes(_cand(sector=None), ScreenCriteria()) is True
+
+
+def test_exchanges_allowlist() -> None:
+    crit = ScreenCriteria(exchanges=("NASDAQ", "NYSE"))
+    assert passes(_cand(exchange="NASDAQ"), crit) is True
+    assert passes(_cand(exchange="NYSE"), crit) is True
+    assert passes(_cand(exchange="AMEX"), crit) is False
+    assert passes(_cand(exchange=None), crit) is False  # reject-on-doubt
+    assert passes(_cand(exchange=None), ScreenCriteria()) is True
+
+
+def test_all_bounds_including_fmp_together() -> None:
+    crit = ScreenCriteria(
+        min_price=Decimal("1"),
+        max_price=Decimal("100"),
+        min_avg_volume=500_000,
+        min_market_cap=1_000_000_000,
+        sectors=("Technology",),
+        exchanges=("NASDAQ",),
+    )
+    full = _cand(
+        price="20",
+        avg_volume=900_000,
+        market_cap=5_000_000_000,
+        sector="Technology",
+        exchange="NASDAQ",
+    )
+    assert passes(full, crit) is True
+    # Each variant fails exactly one bound.
+    assert passes(replace(full, price=Decimal("200")), crit) is False
+    assert passes(replace(full, avg_volume=1), crit) is False
+    assert passes(replace(full, market_cap=10), crit) is False
+    assert passes(replace(full, sector="Energy"), crit) is False
+    assert passes(replace(full, exchange="AMEX"), crit) is False
 
 
 # --------------------------------------------------------------------------

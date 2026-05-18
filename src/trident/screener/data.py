@@ -1,15 +1,18 @@
-"""Alpaca-backed data layer for the screener — the only place that touches the
-network. Keeps all I/O at the edge so the engine stays a pure function.
+"""Alpaca-backed data layer for the screener — keeps all I/O at the edge so the
+engine stays a pure function.
 
-Two responsibilities:
+Responsibilities:
 
-1. **Universe** — :func:`fetch_universe` pulls the tradeable US-equity symbols
-   from Alpaca's ``TradingClient.get_all_assets`` and filters to active,
-   tradable, fractionable-or-not common shares.
+1. **Universe** — :func:`resolve_universe` chooses which symbols to scan. When
+   FMP is configured it asks FMP (:mod:`trident.screener.fmp`) for a
+   criteria-matched universe; otherwise it falls back to :func:`fetch_universe`,
+   the alphabetical tradeable US-equity list from Alpaca's
+   ``TradingClient.get_all_assets``.
 2. **Market facts** — :func:`build_candidates` fetches daily bars in batches via
    ``StockHistoricalDataClient`` and reduces each symbol to a
    :class:`~trident.screener.criteria.ScreenCandidate` (latest price, average
-   daily volume, and recent % change over the lookback window).
+   daily volume, and recent % change over the lookback window), merging in any
+   FMP metadata (market cap, sector, exchange).
 
 A full-universe scan is *slow* — see the module docstring of ``scripts/screen.py``
 and the ``--limit`` flag. The historical client is built exactly like
@@ -21,12 +24,14 @@ constructor so no float ever enters the pipeline.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from trident.audit.log import get_logger
-from trident.screener.criteria import ScreenCandidate
+from trident.screener.criteria import ScreenCandidate, ScreenCriteria
+from trident.screener.fmp import FmpAsset, fetch_fmp_universe, is_configured
 from trident.settings import get_settings
 
 log = get_logger("screener.data")
@@ -86,6 +91,37 @@ def fetch_universe(limit: int | None = None) -> list[str]:
     return symbols
 
 
+def resolve_universe(
+    criteria: ScreenCriteria,
+    *,
+    max_symbols: int,
+    fallback_limit: int | None,
+) -> tuple[list[str], dict[str, FmpAsset]]:
+    """Choose the symbol universe to scan, plus any FMP metadata for it.
+
+    When FMP is configured, ask it for the symbols matching ``criteria`` — a
+    fast, server-side, criteria-relevant universe rather than the alphabetical
+    front of the Alpaca asset list. Returns the (sorted) symbols and a
+    ``{symbol: FmpAsset}`` map so :func:`build_candidates` can merge in market
+    cap / sector / exchange.
+
+    When FMP is not configured, or returns nothing (degraded), fall back to
+    :func:`fetch_universe` with ``limit=fallback_limit`` and an empty metadata
+    map. The screener is outer-ring: FMP is an optimization, never a hard
+    dependency.
+    """
+    if is_configured():
+        assets = fetch_fmp_universe(criteria, max_symbols=max_symbols)
+        if assets:
+            meta = {a.symbol: a for a in assets}
+            symbols = sorted(meta)
+            log.info("screener_universe_fmp", count=len(symbols))
+            return symbols, meta
+        log.info("screener_universe_fmp_empty_fallback")
+    symbols = fetch_universe(limit=fallback_limit)
+    return symbols, {}
+
+
 def _batches(items: list[str], size: int) -> list[list[str]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
@@ -121,13 +157,21 @@ def _candidate_from_bars(symbol: str, bars: list[Any]) -> ScreenCandidate | None
 
 
 def build_candidates(
-    symbols: list[str], lookback_days: int = 20, batch_size: int = BATCH_SIZE
+    symbols: list[str],
+    lookback_days: int = 20,
+    batch_size: int = BATCH_SIZE,
+    fmp_meta: dict[str, FmpAsset] | None = None,
 ) -> list[ScreenCandidate]:
     """Fetch daily bars for ``symbols`` and reduce each to a ScreenCandidate.
 
     ``lookback_days`` is the trading-day window the average volume and % change
     are measured over. Symbols with no bars in the window are dropped silently
     (delisted, brand-new, or simply illiquid enough to have no IEX prints).
+
+    ``fmp_meta`` — when supplied (from :func:`resolve_universe`) — maps each
+    symbol to its :class:`~trident.screener.fmp.FmpAsset`; market cap, sector,
+    and exchange are merged onto the candidate. Symbols absent from the map
+    keep ``None`` for those fields.
 
     Requests are issued in batches of ``batch_size``; a batch that errors is
     logged and skipped rather than failing the whole scan — a screener is
@@ -166,7 +210,16 @@ def build_candidates(
             # Keep only the most recent `lookback_days` daily bars.
             window = sorted(bars, key=lambda b: b.timestamp)[-lookback_days:]
             candidate = _candidate_from_bars(sym, window)
-            if candidate is not None:
-                out.append(candidate)
+            if candidate is None:
+                continue
+            meta = fmp_meta.get(sym) if fmp_meta else None
+            if meta is not None:
+                candidate = replace(
+                    candidate,
+                    market_cap=meta.market_cap,
+                    sector=meta.sector,
+                    exchange=meta.exchange,
+                )
+            out.append(candidate)
     log.info("screener_candidates_built", requested=len(symbols), built=len(out))
     return out

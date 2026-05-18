@@ -10,6 +10,9 @@ Run with:
 from __future__ import annotations
 
 import contextlib
+import threading
+import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -22,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
-from trident.audit.log import configure_logging
+from trident.audit.log import configure_logging, get_logger
 from trident.clock import ET, is_market_open, now_et, nth_business_day_back
 from trident.dashboard.alpaca_view import get_account, list_positions
 from trident.persistence.daily_plan import (
@@ -41,6 +44,12 @@ from trident.persistence.models import (
 from trident.persistence.models import (
     Order as OrderModel,
 )
+from trident.persistence.screen_presets_store import (
+    activate_preset,
+    delete_preset,
+    list_presets,
+    upsert_preset,
+)
 from trident.persistence.session import session_scope
 from trident.persistence.state import (
     kill_switch_engaged,
@@ -48,7 +57,16 @@ from trident.persistence.state import (
     set_kill_switch,
 )
 from trident.persistence.watchlist_store import get_active_watchlist, set_watchlist
-from trident.screener.persistence import get_latest_screen
+from trident.screener.criteria import ScreenCriteria
+from trident.screener.data import build_candidates, resolve_universe
+from trident.screener.engine import screen
+from trident.screener.fmp import EXCHANGES, SECTORS, is_configured
+from trident.screener.persistence import get_latest_screen, save_screen
+from trident.screener.presets import (
+    DEFAULT_CRITERIA,
+    DEFAULT_LOOKBACK_DAYS,
+    resolve_screen_criteria,
+)
 from trident.suggest.persistence import get_latest_suggestions
 from trident.watchlist import WATCHLIST
 
@@ -499,6 +517,271 @@ def _screen_context() -> dict[str, Any]:
 @app.get("/api/screen", response_class=HTMLResponse)
 def api_screen(request: Request) -> Any:
     return templates.TemplateResponse(request, "_screen.html", _screen_context())
+
+
+def _criteria_form_values(c: ScreenCriteria, lookback: int) -> dict[str, Any]:
+    """A ScreenCriteria as string form-input values for the edit form."""
+
+    def _s(v: Any) -> str:
+        return "" if v is None else str(v)
+
+    return {
+        "min_price": _s(c.min_price),
+        "max_price": _s(c.max_price),
+        "min_avg_volume": _s(c.min_avg_volume),
+        "min_change": _s(c.min_change_pct),
+        "max_change": _s(c.max_change_pct),
+        "min_market_cap": _s(c.min_market_cap),
+        "max_market_cap": _s(c.max_market_cap),
+        "sectors": list(c.sectors),
+        "exchanges": list(c.exchanges),
+        "lookback_days": str(lookback),
+    }
+
+
+def _screen_presets_context(notice: str | None = None, error: bool = False) -> dict[str, Any]:
+    """Render context for the Screen filters panel: the presets list plus the
+    active preset's editable bounds.
+
+    Defensive — the screener is outer-ring; a DB hiccup degrades the panel to a
+    placeholder rather than 500-ing the page.
+    """
+    ctx: dict[str, Any] = {
+        "notice": notice,
+        "notice_error": error,
+        "load_error": False,
+        "fmp_configured": is_configured(),
+        "sectors_all": list(SECTORS),
+        "exchanges_all": list(EXCHANGES),
+        "presets": [],
+        "active": None,
+        "form": _criteria_form_values(DEFAULT_CRITERIA, DEFAULT_LOOKBACK_DAYS),
+    }
+    try:
+        presets = list_presets()
+    except Exception:
+        ctx["load_error"] = True
+        return ctx
+    ctx["presets"] = [
+        {
+            "id": str(p.id),
+            "name": p.name,
+            "is_active": p.is_active,
+            "summary": p.criteria.describe(),
+            "lookback_days": p.lookback_days,
+            "source": p.source,
+        }
+        for p in presets
+    ]
+    active = next((p for p in presets if p.is_active), None)
+    if active is not None:
+        ctx["active"] = {"id": str(active.id), "name": active.name}
+        ctx["form"] = _criteria_form_values(active.criteria, active.lookback_days)
+    return ctx
+
+
+def _optional_decimal(raw: str) -> Decimal | None:
+    raw = raw.strip()
+    return Decimal(raw) if raw else None
+
+
+def _optional_int(raw: str) -> int | None:
+    raw = raw.strip()
+    return int(raw) if raw else None
+
+
+def _preset_id_from_form(form: dict[str, list[str]]) -> uuid.UUID | None:
+    raw = (form.get("preset_id") or [""])[0].strip()
+    try:
+        return uuid.UUID(raw)
+    except ValueError:
+        return None
+
+
+def _save_screen_preset(form: dict[str, list[str]]) -> tuple[str, bool]:
+    """Parse, validate and persist a screen preset from the edit form.
+
+    Returns (notice, is_error). A saved preset becomes the active one. A blank
+    numeric field means 'no bound' for that knob.
+    """
+    name = (form.get("name") or [""])[0].strip()
+    if not name:
+        return "Give the preset a name.", True
+    try:
+        min_price = _optional_decimal((form.get("min_price") or [""])[0])
+        max_price = _optional_decimal((form.get("max_price") or [""])[0])
+        min_avg_volume = _optional_int((form.get("min_avg_volume") or [""])[0])
+        min_change = _optional_decimal((form.get("min_change") or [""])[0])
+        max_change = _optional_decimal((form.get("max_change") or [""])[0])
+        min_market_cap = _optional_int((form.get("min_market_cap") or [""])[0])
+        max_market_cap = _optional_int((form.get("max_market_cap") or [""])[0])
+        lookback_raw = (form.get("lookback_days") or ["20"])[0].strip()
+        lookback = int(lookback_raw) if lookback_raw else 20
+    except (ValueError, ArithmeticError):
+        return "Could not parse those values — check the numbers.", True
+
+    if min_price is not None and max_price is not None and min_price > max_price:
+        return "Min price is above max price.", True
+    if min_change is not None and max_change is not None and min_change > max_change:
+        return "Min % change is above max % change.", True
+    if (
+        min_market_cap is not None
+        and max_market_cap is not None
+        and min_market_cap > max_market_cap
+    ):
+        return "Min market cap is above max market cap.", True
+    if lookback < 2:
+        return "Lookback must be at least 2 trading days.", True
+
+    sectors = tuple(s for s in (form.get("sector") or []) if s.strip())
+    exchanges = tuple(e for e in (form.get("exchange") or []) if e.strip())
+    criteria = ScreenCriteria(
+        min_price=min_price,
+        max_price=max_price,
+        min_avg_volume=min_avg_volume,
+        min_change_pct=min_change,
+        max_change_pct=max_change,
+        min_market_cap=min_market_cap,
+        max_market_cap=max_market_cap,
+        sectors=sectors,
+        exchanges=exchanges,
+    )
+    try:
+        preset_id = upsert_preset(name, criteria, lookback, source="manual")
+        activate_preset(preset_id)
+    except ValueError as exc:
+        return str(exc), True
+    except Exception:
+        return "Could not save the preset.", True
+    return f"Preset {name!r} saved and activated.", False
+
+
+def _activate_screen_preset(form: dict[str, list[str]]) -> tuple[str, bool]:
+    preset_id = _preset_id_from_form(form)
+    if preset_id is None:
+        return "No preset selected.", True
+    try:
+        activate_preset(preset_id)
+    except ValueError as exc:
+        return str(exc), True
+    except Exception:
+        return "Could not activate that preset.", True
+    return "Preset activated.", False
+
+
+def _delete_screen_preset(form: dict[str, list[str]]) -> tuple[str, bool]:
+    preset_id = _preset_id_from_form(form)
+    if preset_id is None:
+        return "No preset selected.", True
+    try:
+        delete_preset(preset_id)
+    except ValueError as exc:
+        return str(exc), True
+    except Exception:
+        return "Could not delete that preset.", True
+    return "Preset deleted.", False
+
+
+@app.get("/api/screen-presets", response_class=HTMLResponse)
+def api_screen_presets(request: Request) -> Any:
+    return templates.TemplateResponse(
+        request, "_screen_presets.html", _screen_presets_context()
+    )
+
+
+@app.post("/api/screen-presets", response_class=HTMLResponse)
+async def api_screen_presets_save(request: Request) -> Any:
+    form = parse_qs((await request.body()).decode("utf-8"))
+    action = (form.get("action") or ["save"])[0]
+    if action == "activate":
+        notice, error = _activate_screen_preset(form)
+    elif action == "delete":
+        notice, error = _delete_screen_preset(form)
+    else:
+        notice, error = _save_screen_preset(form)
+    return templates.TemplateResponse(
+        request,
+        "_screen_presets.html",
+        _screen_presets_context(notice=notice, error=error),
+    )
+
+
+# Guards a single screen run at a time — a run is slow (FMP + Alpaca daily
+# bars), so it executes in a daemon thread and the lock rejects overlapping
+# clicks. In-memory: a dashboard restart clears it, which is fine.
+_screen_run_lock = threading.Lock()
+
+
+def _run_screen_background() -> None:
+    """Run a screen with the active preset in a daemon thread, then persist it.
+
+    Outer-ring: every failure is logged and swallowed — a failed run just
+    leaves the Latest screen panel showing the previous run. Always releases
+    the lock so a later run can start.
+    """
+    log = get_logger("dashboard.screen_run")
+    try:
+        criteria, lookback = resolve_screen_criteria()
+        # resolve_universe sends the criteria to FMP; the metadata map it
+        # returns is empty when FMP is unconfigured OR its call failed.
+        symbols, fmp_meta = resolve_universe(
+            criteria, max_symbols=500, fallback_limit=500
+        )
+        run_criteria = criteria
+        if not fmp_meta:
+            # No FMP metadata -> the engine would reject every candidate for the
+            # market-cap / sector / exchange bounds. Drop them and run the
+            # price / volume / % change screen over the Alpaca universe.
+            run_criteria = replace(
+                criteria,
+                min_market_cap=None,
+                max_market_cap=None,
+                sectors=(),
+                exchanges=(),
+            )
+        candidates = build_candidates(symbols, lookback_days=lookback, fmp_meta=fmp_meta)
+        result = screen(candidates, run_criteria)
+        save_screen(
+            result=result,
+            universe_size=len(symbols),
+            lookback_days=lookback,
+            actor="dashboard",
+        )
+        log.info(
+            "dashboard_screen_run_done",
+            scanned=result.scanned,
+            matched=result.matched,
+            fmp_used=bool(fmp_meta),
+        )
+    except Exception:
+        log.exception("dashboard_screen_run_failed")
+    finally:
+        _screen_run_lock.release()
+
+
+def _start_screen_run() -> tuple[str, bool]:
+    """Kick off a background screen run with the active preset.
+
+    Returns (notice, is_error). Rejects a second run while one is in flight.
+    """
+    if not _screen_run_lock.acquire(blocking=False):
+        return "A screen is already running — results appear shortly.", True
+    try:
+        threading.Thread(target=_run_screen_background, daemon=True).start()
+    except Exception:
+        _screen_run_lock.release()
+        return "Could not start the screen run.", True
+    return "Screen started — the Latest screen panel updates when it finishes.", False
+
+
+@app.post("/api/screen-run", response_class=HTMLResponse)
+def api_screen_run(request: Request) -> Any:
+    notice, error = _start_screen_run()
+    return templates.TemplateResponse(
+        request,
+        "_screen_presets.html",
+        _screen_presets_context(notice=notice, error=error),
+    )
 
 
 # Confidence label -> pill style for the AI-suggestions panel.
